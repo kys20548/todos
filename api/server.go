@@ -39,6 +39,8 @@ func (server *Server) setupRouter() {
 	router.POST("/todos", server.createTodo)
 	router.GET("/todos/:id", server.getTodo)
 	router.GET("/todos", server.listTodos)
+	router.PATCH("/todos/:id", server.updateTodo)
+	router.DELETE("/todos/:id", server.deleteTodo)
 
 	server.router = router
 }
