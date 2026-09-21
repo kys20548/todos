@@ -9,10 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	db "todoapp/db/sqlc"
+	"todoapp/errcode"
 )
 
 func (server *Server) healthCheck(ctx *gin.Context) {
-	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+	ok(ctx, gin.H{"status": "ok"})
 }
 
 // todoResponse 是 todo 的對外形狀。
@@ -44,17 +45,18 @@ type createTodoRequest struct {
 func (server *Server) createTodo(ctx *gin.Context) {
 	var req createTodoRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
 	todo, err := server.store.CreateTodo(ctx, req.Title)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, newTodoResponse(todo))
+	getLogger(ctx).Info().Int64("todo_id", todo.ID).Msg("todo created")
+	ok(ctx, newTodoResponse(todo))
 }
 
 type getTodoRequest struct {
@@ -64,21 +66,24 @@ type getTodoRequest struct {
 func (server *Server) getTodo(ctx *gin.Context) {
 	var req getTodoRequest
 	if err := ctx.ShouldBindUri(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
 	todo, err := server.store.GetTodo(ctx, req.ID)
 	if err != nil {
+		// ErrNoRows 不是「系統壞了」，是「你要的東西不在」。
+		// 混進 ErrInternal 的話，查一筆不存在的資料會在 log 裡留一行 error，
+		// 值班的人會被一個正常情況叫起來
 		if errors.Is(err, sql.ErrNoRows) {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			fail(ctx, http.StatusNotFound, errcode.ErrTodoNotFound, nil)
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, newTodoResponse(todo))
+	ok(ctx, newTodoResponse(todo))
 }
 
 type listTodosRequest struct {
@@ -89,7 +94,7 @@ type listTodosRequest struct {
 func (server *Server) listTodos(ctx *gin.Context) {
 	var req listTodosRequest
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
@@ -100,7 +105,7 @@ func (server *Server) listTodos(ctx *gin.Context) {
 
 	todos, err := server.store.ListTodos(ctx, arg)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 
@@ -109,7 +114,7 @@ func (server *Server) listTodos(ctx *gin.Context) {
 		resp = append(resp, newTodoResponse(todo))
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	ok(ctx, resp)
 }
 
 // updateTodoRequest 兩個欄位都是指標：要能分辨「沒帶這個欄位」與「帶了零值」。
@@ -123,20 +128,20 @@ type updateTodoRequest struct {
 func (server *Server) updateTodo(ctx *gin.Context) {
 	var uri getTodoRequest
 	if err := ctx.ShouldBindUri(&uri); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
 	var req updateTodoRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
 	// 什麼都沒帶就擋下來。照樣送 UPDATE 的話，SQL 會把每個欄位
 	// COALESCE 成原值、回 200，呼叫端會以為自己改成功了
 	if req.Title == nil && req.Completed == nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(errors.New("title 與 completed 至少要指定一個")))
+		fail(ctx, http.StatusBadRequest, errcode.ErrTodoNoFieldsToUpdate, nil)
 		return
 	}
 
@@ -151,16 +156,21 @@ func (server *Server) updateTodo(ctx *gin.Context) {
 	todo, err := server.store.UpdateTodo(ctx, arg)
 	if err != nil {
 		// UPDATE ... RETURNING 沒打到任何一列時，sqlc 的 :one 會回 ErrNoRows，
-		// 意思是這個 id 不存在，不是查詢失敗
+		// 意思是這個 id 不存在或已被軟刪除，不是查詢失敗
 		if errors.Is(err, sql.ErrNoRows) {
-			ctx.JSON(http.StatusNotFound, errorResponse(err))
+			fail(ctx, http.StatusNotFound, errcode.ErrTodoNotFound, nil)
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, newTodoResponse(todo))
+	getLogger(ctx).Info().
+		Int64("todo_id", todo.ID).
+		Bool("title_changed", req.Title != nil).
+		Bool("completed_changed", req.Completed != nil).
+		Msg("todo updated")
+	ok(ctx, newTodoResponse(todo))
 }
 
 // deleteTodo 是軟刪除：打上 deleted_at 時間戳，資料列留著。
@@ -169,21 +179,25 @@ func (server *Server) updateTodo(ctx *gin.Context) {
 func (server *Server) deleteTodo(ctx *gin.Context) {
 	var req getTodoRequest
 	if err := ctx.ShouldBindUri(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, errorResponse(err))
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
 
 	rows, err := server.store.SoftDeleteTodo(ctx, req.ID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 	// 影響 0 列代表「不存在」或「已經刪過了」。兩者對呼叫端是同一件事——
-	// 這筆資料現在不在了——所以回同一個 404，不細分
+	// 這筆資料現在不在了——所以回同一個碼，不細分
 	if rows == 0 {
-		ctx.JSON(http.StatusNotFound, errorResponse(sql.ErrNoRows))
+		fail(ctx, http.StatusNotFound, errcode.ErrTodoNotFound, nil)
 		return
 	}
 
-	ctx.Status(http.StatusNoContent)
+	getLogger(ctx).Info().Int64("todo_id", req.ID).Msg("todo soft deleted")
+	// 統一回應格式之後不再回 204：204 規定不能有 body，
+	// 但現在連成功都要走 {code, msg, data}，兩者衝突。
+	// 讓「成功一律 200 + code 0」比省下一個 body 重要
+	ok(ctx, nil)
 }

@@ -30,11 +30,11 @@ Get-Content db\migration\000002_add_soft_delete.up.sql | docker exec -i todoapp_
 
 ```bash
 curl localhost:8080/healthz
-# {"status":"ok"}
+# {"code":0,"msg":"success","data":{"status":"ok"}}
 
 curl -X POST localhost:8080/todos \
   -H 'Content-Type: application/json' -d '{"title":"買牛奶"}'
-# {"id":1,"title":"買牛奶","completed":false,"created_at":"..."}
+# {"code":0,"msg":"success","data":{"id":1,"title":"買牛奶","completed":false,"created_at":"..."}}
 
 curl localhost:8080/todos/1
 curl "localhost:8080/todos?page_id=1&page_size=5"
@@ -45,8 +45,10 @@ curl -X PATCH localhost:8080/todos/1 \
 curl -X PATCH localhost:8080/todos/1 \
   -H 'Content-Type: application/json' -d '{"title":"買豆漿"}'
 
-# 刪除（軟刪除）：成功回 204，不存在或已刪過回 404
-curl -i -X DELETE localhost:8080/todos/1
+# 刪除（軟刪除）：不存在或已刪過回 404 + 40001
+curl -X DELETE localhost:8080/todos/1
+curl localhost:8080/todos/999
+# {"code":40001,"msg":"待辦事項不存在","data":null}
 ```
 
 ## API
@@ -58,7 +60,59 @@ curl -i -X DELETE localhost:8080/todos/1
 | GET | `/todos/:id` | 單筆，不存在回 404 |
 | GET | `/todos?page_id=1&page_size=5` | 分頁列表 |
 | PATCH | `/todos/:id` | 部分更新（`title` / `completed` 至少帶一個），不存在回 404 |
-| DELETE | `/todos/:id` | **軟刪除**，成功回 204；不存在或已刪過回 404 |
+| DELETE | `/todos/:id` | **軟刪除**；不存在或已刪過回 404 + 40001 |
+
+所有回應（含錯誤）都是 `{code, msg, data}`：
+
+```json
+{"code": 0,     "msg": "success",        "data": {...}}
+{"code": 40001, "msg": "待辦事項不存在",  "data": null}
+```
+
+## 錯誤碼
+
+定義在 `errcode/errcode.go`。分段：0 成功、1xxxx 通用、4xxxx todo
+（2xxxx / 3xxxx 留給之後的模組）。
+
+**只定義目前真的有分支會回傳的碼**——多一個沒人回傳的碼，排查時會有人去追
+一條不存在的路徑；少一個，兩種處置方式不同的失敗就會擠在同一個碼上。
+
+| 碼 | HTTP | 觸發分支 | 拿掉它會怎樣 |
+|---|---|---|---|
+| 0 | 200 | 成功 | — |
+| 10001 | 500 | DB 錯誤、panic | handler 失去「這裡我沒想到」的統一落點 |
+| 10002 | 400 | gin binding 失敗 | 呼叫端分不出「我送錯」與「伺服器壞了」，會一直重送同一個壞請求 |
+| 10004 | 404 | 路由不存在 | gin 回純文字 404，前端解 envelope 會炸在跟業務無關的地方 |
+| 40001 | 404 | todo 不存在 **或已被軟刪除** | 刪一筆不存在的資料回成功，前端不知道自己拿的是舊清單 |
+| 40002 | 400 | PATCH 沒帶任何欄位 | SQL 全部 COALESCE 成原值後回 200，呼叫端以為改成功了 |
+
+**錯誤細節不回給 client**：`fail(ctx, status, code, err)` 的 `err` 只進 log
+（經 `ctx.Error()`，由 access log 那一行印出來），client 永遠只拿到 errcode
+的固定訊息。DB 錯誤訊息會帶出表名、欄位名甚至參數值，排查需要的東西
+應該用 request_id 去 log 撈，不該從瀏覽器看。
+
+**刪除成功回 200 不回 204**：204 規定不能有 body，但成功也要走
+`{code, msg, data}`——「成功一律 200 + code 0」比省下一個 body 重要。
+
+## 日誌與排查
+
+每個請求都有 `request_id`，同時回在 `X-Request-Id` header 上。
+一次請求的 access log、handler 裡的 log、錯誤那一行都帶同一個 id，
+撈一次就看得到完整因果，不必靠時間戳去猜是哪一筆。
+
+```
+{"level":"info","request_id":"9f3c…","todo_id":4,"message":"todo created"}
+{"level":"info","request_id":"9f3c…","method":"POST","path":"/todos","status_code":200,"duration":3.1,"message":"received a HTTP request"}
+```
+
+- **等級跟著 status 走**：5xx 是 `error`、4xx 是 `warn`、其餘 `info`——
+  「只看 error」就等於「只看伺服器自己的問題」，不會被使用者輸入錯誤淹沒。
+- **回應裡看不到的原始錯誤在 access log 的 `error` 欄位**（`ctx.Errors`）。
+- middleware 順序：`requestID → httpLogger → recovery → handler`。
+  requestID 在最外層因為之後每層都要用它；recovery 在最內層，
+  panic 才不會穿過 httpLogger——否則最該被記錄的那次請求反而沒有 access log。
+- request_id 用 `crypto/rand` 的 16 bytes hex，沒有為此引進 uuid 套件：
+  它只需要「在一段時間的 log 裡不撞」。
 
 ## 程式結構
 
@@ -67,7 +121,8 @@ curl -i -X DELETE localhost:8080/todos/1
 ```
 ├── main.go              # 進入點：載入設定、連 DB、啟動 server、監聽關閉訊號
 ├── app.env              # viper 設定檔（環境變數可覆蓋）
-├── api/                 # gin handler、路由、middleware
+├── api/                 # gin handler、路由、middleware、統一回應
+├── errcode/             # 業務狀態碼
 ├── db/
 │   ├── migration/       # golang-migrate 的 SQL
 │   ├── query/           # sqlc 的 query 定義
@@ -120,5 +175,6 @@ CREATE TABLE "todos" (
 - [x] `POST /todos`、`GET /todos/:id`、`GET /todos`（分頁）、`GET /healthz`
 - [x] `PATCH /todos/:id`（部分更新）、`DELETE /todos/:id`（軟刪除）
 - [ ] 還原已刪除的 todo
-- [ ] 統一回應格式與錯誤碼（目前跟模板一樣是 `{"error": "..."}`）
+- [x] 統一回應格式 `{code, msg, data}` + 錯誤碼 `errcode/`
+- [x] request_id 貫穿、access log 分級、統一 panic 回應
 - [ ] 前端

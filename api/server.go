@@ -32,7 +32,23 @@ func (server *Server) setupRouter() {
 
 	// 不用 gin.Default()：以 zerolog middleware 取代 gin 內建 logger
 	router := gin.New()
-	router.Use(httpLogger(), gin.Recovery())
+
+	// middleware 的順序就是洋蔥的層數：ctx.Next() 之前的在「進去」的路上跑，
+	// 之後的在「出來」的路上跑。
+	//
+	//   requestID → httpLogger → recovery → handler
+	//
+	// requestID 在最外層，因為之後每一層記 log 都要用它；
+	// recovery 在最內層，panic 才不會穿過 httpLogger——否則
+	// 最需要被記錄的那次請求反而不會有 access log。
+	router.Use(
+		requestIDMiddleware(),
+		httpLogger(),
+		gin.CustomRecovery(recoveryHandler),
+	)
+
+	// 打錯網址也要回統一格式，不要漏出 gin 預設的純文字 404
+	router.NoRoute(noRouteHandler)
 
 	router.GET("/healthz", server.healthCheck)
 
@@ -48,8 +64,4 @@ func (server *Server) setupRouter() {
 // Router 回傳 gin engine，讓 main 可以把它掛到 http.Server 上做 graceful shutdown。
 func (server *Server) Router() *gin.Engine {
 	return server.router
-}
-
-func errorResponse(err error) gin.H {
-	return gin.H{"error": err.Error()}
 }
