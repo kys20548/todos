@@ -10,6 +10,31 @@ import (
 	"database/sql"
 )
 
+const countTodos = `-- name: CountTodos :one
+SELECT
+    count(*)                                   AS total,
+    count(*) FILTER (WHERE completed = false)  AS active,
+    count(*) FILTER (WHERE completed = true)   AS completed
+FROM todos
+WHERE deleted_at IS NULL
+`
+
+type CountTodosRow struct {
+	Total     int64 `json:"total"`
+	Active    int64 `json:"active"`
+	Completed int64 `json:"completed"`
+}
+
+// 三個數字一次查完，而且**不受 status 與分頁影響**：前端 footer 要顯示的是
+// 「還有幾筆未完成」這個全域數字，不是「這一頁有幾筆」。
+// 分三支 query 去數會讓三個數字來自三個時間點。
+func (q *Queries) CountTodos(ctx context.Context) (CountTodosRow, error) {
+	row := q.db.QueryRowContext(ctx, countTodos)
+	var i CountTodosRow
+	err := row.Scan(&i.Total, &i.Active, &i.Completed)
+	return i, err
+}
+
 const createTodo = `-- name: CreateTodo :one
 INSERT INTO todos (
     title
@@ -54,18 +79,27 @@ func (q *Queries) GetTodo(ctx context.Context, id int64) (Todo, error) {
 const listTodos = `-- name: ListTodos :many
 SELECT id, title, completed, created_at, deleted_at FROM todos
 WHERE deleted_at IS NULL
+  AND CASE $1::text
+        WHEN 'active'    THEN completed = false
+        WHEN 'completed' THEN completed = true
+        ELSE true
+      END
 ORDER BY id
-LIMIT $1
+LIMIT $3
 OFFSET $2
 `
 
 type ListTodosParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Status     string `json:"status"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
 }
 
+// status 只有 all / active / completed 三種，值域在 handler 用 binding:"oneof" 擋。
+// 篩選寫在 SQL 而不是撈回來再過濾：不讓資料量決定記憶體用量，
+// 也讓「分頁」與「篩選」算在同一組資料上（先過濾再分頁才是對的）。
 func (q *Queries) ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error) {
-	rows, err := q.db.QueryContext(ctx, listTodos, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listTodos, arg.Status, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +125,41 @@ func (q *Queries) ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const setAllTodosCompleted = `-- name: SetAllTodosCompleted :execrows
+UPDATE todos
+SET completed = $1
+WHERE deleted_at IS NULL AND completed <> $1
+`
+
+// todomvc 的「全選 / 取消全選」。
+//
+// WHERE 只挑真正需要改的列（completed <> 目標值）：回傳的影響列數才等於
+// 「這次實際改了幾筆」，log 看得出這次操作的規模；全部已經是目標狀態時
+// 影響 0 列，那不是錯誤。
+func (q *Queries) SetAllTodosCompleted(ctx context.Context, completed bool) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setAllTodosCompleted, completed)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const softDeleteCompletedTodos = `-- name: SoftDeleteCompletedTodos :execrows
+UPDATE todos
+SET deleted_at = now()
+WHERE deleted_at IS NULL AND completed = true
+`
+
+// todomvc 的「清除已完成」。跟單筆刪除一樣是軟刪除，不是真的 DELETE——
+// 兩條路徑的刪除語意必須一致，否則「哪些資料救得回來」要看使用者按了哪個鈕。
+func (q *Queries) SoftDeleteCompletedTodos(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteCompletedTodos)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const softDeleteTodo = `-- name: SoftDeleteTodo :execrows

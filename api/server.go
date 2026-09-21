@@ -52,9 +52,16 @@ func (server *Server) setupRouter() {
 
 	router.GET("/healthz", server.healthCheck)
 
-	router.POST("/todos", server.createTodo)
-	router.GET("/todos/:id", server.getTodo)
+	// 集合層級：對「整批 todo」做的事打在集合上。
+	// 不用 /todos/complete-all 這種靜態片段，是因為它會跟 /todos/:id
+	// 在路由樹的同一層衝突，gin 註冊時會直接 panic
 	router.GET("/todos", server.listTodos)
+	router.POST("/todos", server.createTodo)
+	router.PATCH("/todos", server.completeAllTodos)
+	router.DELETE("/todos", server.deleteCompletedTodos)
+
+	// 單筆
+	router.GET("/todos/:id", server.getTodo)
 	router.PATCH("/todos/:id", server.updateTodo)
 	router.DELETE("/todos/:id", server.deleteTodo)
 

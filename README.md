@@ -37,7 +37,22 @@ curl -X POST localhost:8080/todos \
 # {"code":0,"msg":"success","data":{"id":1,"title":"買牛奶","completed":false,"created_at":"..."}}
 
 curl localhost:8080/todos/1
-curl "localhost:8080/todos?page_id=1&page_size=5"
+
+# 列表：三個參數都是選填（預設 status=all、page_id=1、page_size=50）
+curl localhost:8080/todos
+curl "localhost:8080/todos?status=active"
+curl "localhost:8080/todos?status=completed&page_id=1&page_size=10"
+# {"code":0,"msg":"success","data":{
+#   "items":[...],
+#   "summary":{"total":3,"active":2,"completed":1}}}
+
+# 全選 / 取消全選
+curl -X PATCH localhost:8080/todos \
+  -H 'Content-Type: application/json' -d '{"completed":true}'
+# {"code":0,"msg":"success","data":{"affected":2}}
+
+# 清除已完成（status 必填且只接受 completed）
+curl -X DELETE "localhost:8080/todos?status=completed"
 
 # 部分更新：只帶要改的欄位，沒帶的維持原值
 curl -X PATCH localhost:8080/todos/1 \
@@ -58,9 +73,41 @@ curl localhost:8080/todos/999
 | GET | `/healthz` | 健康檢查 |
 | POST | `/todos` | 新增 |
 | GET | `/todos/:id` | 單筆，不存在回 404 |
-| GET | `/todos?page_id=1&page_size=5` | 分頁列表 |
+| GET | `/todos?status=&page_id=&page_size=` | 列表 + 統計；參數皆選填 |
+| PATCH | `/todos` | 全部設為完成 / 未完成（`{"completed": bool}`），回 `affected` |
+| DELETE | `/todos?status=completed` | 清除已完成（軟刪除），回 `affected`；`status` 必填 |
 | PATCH | `/todos/:id` | 部分更新（`title` / `completed` 至少帶一個），不存在回 404 |
 | DELETE | `/todos/:id` | **軟刪除**；不存在或已刪過回 404 + 40001 |
+
+### 列表的回應形狀
+
+```json
+{"code":0,"msg":"success","data":{
+  "items": [{"id":1,"title":"買牛奶","completed":false,"created_at":"..."}],
+  "summary": {"total":3,"active":2,"completed":1}
+}}
+```
+
+- **`summary` 不受 `status` 與分頁影響**，一律統計「全部未刪除的 todo」。
+  前端 footer 要的是「還有幾筆未完成」這個全域數字，不是「這一頁有幾筆」；
+  而且 `status=active` 的清單裡根本沒有已完成的項目，呼叫端自己算不出 `completed`。
+- 從「直接回陣列」改成物件是為了讓統計有地方放。多包一層，換到的是
+  一次請求就拿到畫面需要的全部資訊——分兩支 API 的話兩個數字會來自兩個時間點。
+- **分頁參數改成選填帶預設值**（`page_id=1`、`page_size=50`，上限 200）：
+  API 不該假設只有一個呼叫端。沒有分頁 UI 的前端不必為了拿資料而編造參數，
+  要分頁的呼叫端照樣能分。
+
+### 集合層級的操作
+
+全選與清除已完成打在集合上（`PATCH /todos`、`DELETE /todos?status=completed`），
+不是 `/todos/complete-all` 這種子路徑——**靜態片段與 `:id` 在 gin 的路由樹同一層
+會衝突，註冊時直接 panic**；而且「對整個集合做一次部分更新」本來就該打在集合上。
+
+`DELETE /todos` 的 `status` 沒有預設值也不接受 `all`：批次刪除必須明講刪哪一批，
+否則一個漏帶參數的請求就會清空整張表。清除已完成跟單筆刪除一樣是**軟刪除**——
+兩條路徑的刪除語意必須一致，否則「哪些資料救得回來」要看使用者按了哪個鈕。
+
+---
 
 所有回應（含錯誤）都是 `{code, msg, data}`：
 
@@ -177,4 +224,5 @@ CREATE TABLE "todos" (
 - [ ] 還原已刪除的 todo
 - [x] 統一回應格式 `{code, msg, data}` + 錯誤碼 `errcode/`
 - [x] request_id 貫穿、access log 分級、統一 panic 回應
-- [ ] 前端
+- [x] 列表篩選 `status`、全域統計 `summary`、全選、清除已完成（給前端用）
+- [ ] 前端（todomvc `examples/javascript-es5`，放在同 repo 的 `web/`）

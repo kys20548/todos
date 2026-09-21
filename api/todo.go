@@ -86,10 +86,45 @@ func (server *Server) getTodo(ctx *gin.Context) {
 	ok(ctx, newTodoResponse(todo))
 }
 
-type listTodosRequest struct {
-	PageID   int32 `form:"page_id" binding:"required,min=1"`
-	PageSize int32 `form:"page_size" binding:"required,min=5,max=50"`
+// todoSummary 是「全部未刪除的 todo」的統計，**不受 status 與分頁影響**。
+//
+// 前端 footer 要顯示的是「還有幾筆未完成」這個全域數字，而不是「這一頁有幾筆」；
+// 而且 status=active 的清單裡根本沒有已完成的項目，呼叫端自己算不出 completed。
+type todoSummary struct {
+	Total     int64 `json:"total"`
+	Active    int64 `json:"active"`
+	Completed int64 `json:"completed"`
 }
+
+// listTodosResponse 一起回清單與統計。
+//
+// 這裡從「直接回一個陣列」改成物件，是為了讓統計有地方放。多包一層的代價
+// 換到的是：呼叫端一次請求就拿到畫面需要的全部資訊，不必再打第二支 API——
+// 兩支 API 的數字還會來自兩個時間點。
+type listTodosResponse struct {
+	Items   []todoResponse `json:"items"`
+	Summary todoSummary    `json:"summary"`
+}
+
+// listTodosRequest 三個參數都是選填。
+//
+// 分頁參數從必填改成選填帶預設值：API 不該假設只有一個呼叫端。
+// 沒有分頁 UI 的前端不必為了拿資料而編造 page_id=1&page_size=50，
+// 要分頁的呼叫端照樣能分。
+type listTodosRequest struct {
+	// oneof 把值域擋在 handler：SQL 那邊的 CASE 對未知值會落到 ELSE（等同 all），
+	// 不擋的話 status=activ 這種錯字會安靜地回全部，
+	// 使用者只會覺得「篩選壞了」卻沒有任何一行 log 提到它
+	Status   string `form:"status" binding:"omitempty,oneof=all active completed"`
+	PageID   int32  `form:"page_id" binding:"omitempty,min=1"`
+	PageSize int32  `form:"page_size" binding:"omitempty,min=1,max=200"`
+}
+
+const (
+	defaultListStatus   = "all"
+	defaultListPageID   = 1
+	defaultListPageSize = 50
+)
 
 func (server *Server) listTodos(ctx *gin.Context) {
 	var req listTodosRequest
@@ -97,10 +132,20 @@ func (server *Server) listTodos(ctx *gin.Context) {
 		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
 		return
 	}
+	if req.Status == "" {
+		req.Status = defaultListStatus
+	}
+	if req.PageID == 0 {
+		req.PageID = defaultListPageID
+	}
+	if req.PageSize == 0 {
+		req.PageSize = defaultListPageSize
+	}
 
 	arg := db.ListTodosParams{
-		Limit:  req.PageSize,
-		Offset: (req.PageID - 1) * req.PageSize,
+		Status:     req.Status,
+		PageLimit:  req.PageSize,
+		PageOffset: (req.PageID - 1) * req.PageSize,
 	}
 
 	todos, err := server.store.ListTodos(ctx, arg)
@@ -109,12 +154,25 @@ func (server *Server) listTodos(ctx *gin.Context) {
 		return
 	}
 
-	resp := make([]todoResponse, 0, len(todos))
-	for _, todo := range todos {
-		resp = append(resp, newTodoResponse(todo))
+	count, err := server.store.CountTodos(ctx)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
+		return
 	}
 
-	ok(ctx, resp)
+	items := make([]todoResponse, 0, len(todos))
+	for _, todo := range todos {
+		items = append(items, newTodoResponse(todo))
+	}
+
+	ok(ctx, listTodosResponse{
+		Items: items,
+		Summary: todoSummary{
+			Total:     count.Total,
+			Active:    count.Active,
+			Completed: count.Completed,
+		},
+	})
 }
 
 // updateTodoRequest 兩個欄位都是指標：要能分辨「沒帶這個欄位」與「帶了零值」。
@@ -200,4 +258,69 @@ func (server *Server) deleteTodo(ctx *gin.Context) {
 	// 但現在連成功都要走 {code, msg, data}，兩者衝突。
 	// 讓「成功一律 200 + code 0」比省下一個 body 重要
 	ok(ctx, nil)
+}
+
+// completeAllTodosRequest 的 Completed 是指標 + required：
+// bool 的零值是 false，非指標的話 required 會把「全部取消完成」
+// （{"completed": false}）當成沒帶欄位擋掉。
+type completeAllTodosRequest struct {
+	Completed *bool `json:"completed" binding:"required"`
+}
+
+// completeAllTodos 把所有 todo 一次設為完成或未完成（todomvc 的全選）。
+// PATCH /todos
+//
+// 端點打在集合本身而不是 /todos/complete-all：gin 的路由樹裡靜態片段
+// 與 :id 這種參數片段同層會衝突（註冊時直接 panic），而「對整個集合
+// 做一次部分更新」本來就該打在集合上，跟 PATCH /todos/:id 語意一致。
+func (server *Server) completeAllTodos(ctx *gin.Context) {
+	var req completeAllTodosRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
+		return
+	}
+
+	rows, err := server.store.SetAllTodosCompleted(ctx, *req.Completed)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
+		return
+	}
+
+	// 這行 log 的重點是 affected：批次操作出事時要先知道它動了幾筆。
+	// 影響 0 列不是錯誤（本來就全部都是那個狀態了），但看得到 0
+	// 跟看不到，排查時差很多
+	getLogger(ctx).Info().
+		Bool("completed", *req.Completed).
+		Int64("affected", rows).
+		Msg("all todos completion updated")
+	ok(ctx, gin.H{"affected": rows})
+}
+
+// deleteTodosRequest 的 status 沒有預設值、也不接受 all：
+// 批次刪除必須明講刪的是哪一批。少了這個限制，一個漏帶參數的
+// DELETE /todos 就會把整張表清掉。
+type deleteTodosRequest struct {
+	Status string `form:"status" binding:"required,oneof=completed"`
+}
+
+// deleteCompletedTodos 清除所有已完成的 todo（todomvc 的 clear completed）。
+// DELETE /todos?status=completed
+//
+// 跟單筆刪除一樣是軟刪除：兩條路徑的刪除語意必須一致，
+// 否則「哪些資料救得回來」要看使用者按了哪個鈕。
+func (server *Server) deleteCompletedTodos(ctx *gin.Context) {
+	var req deleteTodosRequest
+	if err := ctx.ShouldBindQuery(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, errcode.ErrInvalidParams, err)
+		return
+	}
+
+	rows, err := server.store.SoftDeleteCompletedTodos(ctx)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
+		return
+	}
+
+	getLogger(ctx).Info().Int64("affected", rows).Msg("completed todos soft deleted")
+	ok(ctx, gin.H{"affected": rows})
 }
