@@ -3,5 +3,8 @@
 .DS_Store
 *.out
 main
+main.exe
+migrate
+migrate.exe
 template_golang_web
 .env

@@ -9,6 +9,7 @@
 | gin-gonic/gin | v1.12.0 |
 | sqlc | v1.31.1 |
 | golang-migrate | v4.18.1 |
+| urfave/cli | v3.13.0 |
 | lib/pq | v1.12.3 |
 | spf13/viper | v1.21.0 |
 
@@ -17,11 +18,13 @@
 ## 如何啟動
 
 ```bash
-docker compose up -d --build      # 啟動 PostgreSQL、app、pgAdmin
-docker compose run --rm app ./migrate   # 第一次啟動，或之後有新 migration 時執行
+docker compose up -d --build               # 啟動 PostgreSQL、app、pgAdmin
+docker compose run --rm app ./migrate up   # 第一次啟動，或之後有新 migration 時執行
 ```
 
-migration 是獨立指令（`cmd/migrate`），不跟著 app 啟動自動跑——重啟 server 不該順便重跑一次 migration。
+migration 是獨立的 CLI 指令（`cmd/migrate`，用 urfave/cli 包的），不跟著 app 啟動自動跑——重啟 server
+不該順便重跑一次 migration。這支指令本身不依賴 Makefile 或 docker-compose，`./migrate --help`、
+`./migrate up`、`./migrate down` 可以直接拿二進位單獨執行，要接哪個資料庫用 `--database` 覆蓋。
 
 本機開發想直接跑 server（不進 container）：指令要在專案根目錄執行，因為 server 讀 `app.env`、
 掛靜態檔都是用相對路徑：

@@ -10,7 +10,7 @@ Go backend for a todo app (gin + viper + sqlc + PostgreSQL), scaffolded from `te
 
 ```bash
 docker compose up -d --build            # start Postgres + app + pgAdmin
-docker compose run --rm app ./migrate   # apply migrations — separate from app startup on purpose, see below
+docker compose run --rm app ./migrate up   # apply migrations — separate from app startup on purpose, see below
 ```
 
 For local iteration without rebuilding the image:
@@ -44,7 +44,7 @@ pkg/, third_party/       # empty placeholders — nothing in this project needs 
 
 ### Migration is a separate command, not part of server startup
 
-`cmd/migrate` links `golang-migrate` as a library (not the external CLI) and only does `Up`/`Down` against `internal/db/migration`. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate` in a container, `go run ./cmd/migrate` locally.
+`cmd/migrate` links `golang-migrate` as a library (not the external CLI) and only does `Up`/`Down` against `internal/db/migration`. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
 
 ### Response envelope
 
