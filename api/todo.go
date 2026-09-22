@@ -90,20 +90,14 @@ func (server *Server) getTodo(ctx *gin.Context) {
 //
 // 前端 footer 要顯示的是「還有幾筆未完成」這個全域數字，而不是「這一頁有幾筆」；
 // 而且 status=active 的清單裡根本沒有已完成的項目，呼叫端自己算不出 completed。
+//
+// 跟 GET /todos 分成兩支 API：列表跟統計是兩個不同用途，只要統計數字的呼叫端
+// （例如 footer）不該為了拿三個數字，還要讓後端多跑一次帶篩選/分頁條件的
+// 列表查詢；資料量大的時候，這一次多餘的列表查詢不是免費的。
 type todoSummary struct {
 	Total     int64 `json:"total"`
 	Active    int64 `json:"active"`
 	Completed int64 `json:"completed"`
-}
-
-// listTodosResponse 一起回清單與統計。
-//
-// 這裡從「直接回一個陣列」改成物件，是為了讓統計有地方放。多包一層的代價
-// 換到的是：呼叫端一次請求就拿到畫面需要的全部資訊，不必再打第二支 API——
-// 兩支 API 的數字還會來自兩個時間點。
-type listTodosResponse struct {
-	Items   []todoResponse `json:"items"`
-	Summary todoSummary    `json:"summary"`
 }
 
 // listTodosRequest 三個參數都是選填。
@@ -154,24 +148,30 @@ func (server *Server) listTodos(ctx *gin.Context) {
 		return
 	}
 
+	items := make([]todoResponse, 0, len(todos))
+	for _, todo := range todos {
+		items = append(items, newTodoResponse(todo))
+	}
+
+	ok(ctx, items)
+}
+
+// getTodosSummary 只回統計，不跑列表查詢。
+//
+// 端點是 /todos-summary 而不是 /todos/summary：後者是靜態片段，會跟
+// /todos/:id 在 gin 路由樹同一層衝突，註冊時直接 panic（跟這專案不用
+// /todos/complete-all 是同一個理由）。
+func (server *Server) getTodosSummary(ctx *gin.Context) {
 	count, err := server.store.CountTodos(ctx)
 	if err != nil {
 		fail(ctx, http.StatusInternalServerError, errcode.ErrInternal, err)
 		return
 	}
 
-	items := make([]todoResponse, 0, len(todos))
-	for _, todo := range todos {
-		items = append(items, newTodoResponse(todo))
-	}
-
-	ok(ctx, listTodosResponse{
-		Items: items,
-		Summary: todoSummary{
-			Total:     count.Total,
-			Active:    count.Active,
-			Completed: count.Completed,
-		},
+	ok(ctx, todoSummary{
+		Total:     count.Total,
+		Active:    count.Active,
+		Completed: count.Completed,
 	})
 }
 

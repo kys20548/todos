@@ -50,6 +50,12 @@ func (server *Server) setupRouter() {
 	// 打錯網址也要回統一格式，不要漏出 gin 預設的純文字 404
 	router.NoRoute(noRouteHandler)
 
+	// 前端靜態檔案：固定字首（/css、/js）而不是根目錄的萬用路由，
+	// 避免跟 /todos、/healthz 這些已註冊的路由在 gin 路由樹的根節點衝突。
+	router.StaticFile("/", "./web/index.html")
+	router.Static("/css", "./web/css")
+	router.Static("/js", "./web/js")
+
 	router.GET("/healthz", server.healthCheck)
 
 	// 集合層級：對「整批 todo」做的事打在集合上。
@@ -59,6 +65,10 @@ func (server *Server) setupRouter() {
 	router.POST("/todos", server.createTodo)
 	router.PATCH("/todos", server.completeAllTodos)
 	router.DELETE("/todos", server.deleteCompletedTodos)
+
+	// 獨立的統計端點：不能叫 /todos/summary，那是靜態片段，
+	// 會跟下面的 /todos/:id 在路由樹同一層衝突
+	router.GET("/todos-summary", server.getTodosSummary)
 
 	// 單筆
 	router.GET("/todos/:id", server.getTodo)
