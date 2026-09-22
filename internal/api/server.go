@@ -3,8 +3,8 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
-	db "todoapp/db/sqlc"
-	"todoapp/util"
+	db "todoapp/internal/db/sqlc"
+	"todoapp/internal/util"
 )
 
 // Server 負責處理所有 HTTP 請求。
@@ -30,7 +30,7 @@ func (server *Server) setupRouter() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// 不用 gin.Default()：以 zerolog middleware 取代 gin 內建 logger
+	// 不用 gin.Default()：以 slog middleware 取代 gin 內建 logger
 	router := gin.New()
 
 	// middleware 的順序就是洋蔥的層數：ctx.Next() 之前的在「進去」的路上跑，

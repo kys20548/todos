@@ -4,23 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Go backend for a todo app (gin + viper + sqlc + PostgreSQL), scaffolded from `template_golang_web` with `user` swapped for `todo`. No frontend yet (planned: todomvc in `web/`). Backend only, no tests currently exist.
+Go backend for a todo app (gin + viper + sqlc + PostgreSQL), scaffolded from `template_golang_web` with `user` swapped for `todo`. Frontend is a TodoMVC (`javascript-es5`) build in `web/`, served by the same gin server. Layout follows the standard `cmd/`/`internal/`/`pkg/`/`third_party/` Go project convention; `pkg/` and `third_party/` are currently empty placeholders. No tests currently exist.
 
 ## Commands
 
 ```bash
-docker compose up -d          # start PostgreSQL (make postgres)
-make migrateup                # apply migrations (requires golang-migrate CLI)
-make migratedown               # roll back migrations
-go run main.go                 # start server (make server)
-make sqlc                      # regenerate db/sqlc/ from db/query/*.sql after editing queries
-make test                      # go test -v -cover ./...
+docker compose up -d --build            # start Postgres + app + pgAdmin
+docker compose run --rm app ./migrate   # apply migrations — separate from app startup on purpose, see below
 ```
 
-On Windows without `make`/`migrate` CLI, pipe SQL into the container directly instead:
-```powershell
-Get-Content db\migration\000001_init_schema.up.sql | docker exec -i todoapp_db psql -U root -d todoapp
-Get-Content db\migration\000002_add_soft_delete.up.sql | docker exec -i todoapp_db psql -U root -d todoapp
+For local iteration without rebuilding the image:
+```bash
+docker compose up -d postgres   # start only Postgres (make postgres)
+make migrateup                  # apply migrations (go run ./cmd/migrate up)
+make migratedown                # roll back migrations (go run ./cmd/migrate down)
+go run ./cmd/todoapp             # start server (make server) — must run from repo root, app.env/web/ are resolved relative to cwd
+make sqlc                       # regenerate internal/db/sqlc/ from internal/db/query/*.sql after editing queries
+make test                       # go test -v -cover ./...
 ```
 
 Server reads config from `app.env` via viper (`util.LoadConfig`); any field can be overridden by an environment variable of the same name (e.g. `DB_SOURCE`, `HTTP_SERVER_ADDRESS`).
@@ -28,24 +28,31 @@ Server reads config from `app.env` via viper (`util.LoadConfig`); any field can 
 ## Architecture
 
 ```
-main.go        # load config → open DB → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
-api/            # gin handlers, router, middleware, unified response envelope
-errcode/        # business status codes
-db/migration/   # golang-migrate SQL, also doubles as sqlc's schema source
-db/query/       # sqlc query definitions (.sql)
-db/sqlc/        # sqlc-generated code + hand-written Store interface (store.go)
-util/           # viper config loading
+cmd/todoapp/main.go     # load config → open DB → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
+cmd/migrate/main.go     # standalone migration command (up/down), not run as part of server startup
+internal/api/            # gin handlers, router, middleware, unified response envelope
+internal/errcode/        # business status codes
+internal/db/migration/   # golang-migrate SQL, also doubles as sqlc's schema source
+internal/db/query/       # sqlc query definitions (.sql)
+internal/db/sqlc/        # sqlc-generated code + hand-written Store interface (store.go)
+internal/util/           # viper config loading
+web/                     # static frontend (TodoMVC), served directly by gin
+pkg/, third_party/       # empty placeholders — nothing in this project needs them yet
 ```
 
-`db.Store` embeds the sqlc-generated `Querier` interface (`db/sqlc/store.go`); `SQLStore` wraps a `*sql.DB` and adds `execTx` for transactions. Handlers depend on `db.Store`, not the concrete struct, so it can be mocked in tests.
+`db.Store` embeds the sqlc-generated `Querier` interface (`internal/db/sqlc/store.go`); `SQLStore` wraps a `*sql.DB` and adds `execTx` for transactions. Handlers depend on `db.Store`, not the concrete struct, so it can be mocked in tests.
+
+### Migration is a separate command, not part of server startup
+
+`cmd/migrate` links `golang-migrate` as a library (not the external CLI) and only does `Up`/`Down` against `internal/db/migration`. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate` in a container, `go run ./cmd/migrate` locally.
 
 ### Response envelope
 
-Every response — success or error — is `{code, msg, data}` (`api/response.go`). Handlers never `ctx.JSON` directly; they call `ok(ctx, data)` or `fail(ctx, httpStatus, errcode.Code, err)`. `err` is passed only for logging (via `ctx.Error()`), never serialized to the client — DB errors can leak table/column/parameter names, so callers must go through `request_id` + logs instead. Codes are defined in `errcode/errcode.go`, segmented `0` success, `1xxxx` generic, `4xxxx` todo-specific (`2xxxx`/`3xxxx` reserved for future modules). Only codes an actual branch returns are defined — don't add speculative codes.
+Every response — success or error — is `{code, msg, data}` (`internal/api/response.go`). Handlers never `ctx.JSON` directly; they call `ok(ctx, data)` or `fail(ctx, httpStatus, errcode.Code, err)`. `err` is passed only for logging (via `ctx.Error()`), never serialized to the client — DB errors can leak table/column/parameter names, so callers must go through `request_id` + logs instead. Codes are defined in `internal/errcode/errcode.go` as `Code{ID, Msg}` values — code and message are declared together in one variable so they can't drift apart — segmented `E000` success, `E0xx` generic, `E1xx` todo-specific (`E2xx`/`E3xx` reserved for future modules). `Response` embeds `errcode.Code` anonymously so its `code`/`msg` fields flatten straight into the envelope. Only codes an actual branch returns are defined — don't add speculative codes.
 
 ### Middleware order
 
-`requestIDMiddleware → httpLogger → gin.CustomRecovery(recoveryHandler)`, registered in that order in `api/server.go`. This is load-bearing, not arbitrary:
+`requestIDMiddleware → httpLogger → gin.CustomRecovery(recoveryHandler)`, registered in that order in `internal/api/server.go`. This is load-bearing, not arbitrary:
 - `requestIDMiddleware` must be outermost — every later layer's logger needs the id it sets.
 - `recoveryHandler` must be innermost so a panic doesn't skip past `httpLogger`, which would silently drop the access log line for the one request that most needs it.
 

@@ -1,5 +1,3 @@
-DB_URL=postgresql://root:secret@localhost:5432/todoapp?sslmode=disable
-
 postgres:
 	docker compose up -d
 
@@ -10,16 +8,16 @@ dropdb:
 	docker exec -it todoapp_db dropdb todoapp
 
 migrateup:
-	migrate -path db/migration -database "postgresql://root:secret@localhost:5432/todoapp?sslmode=disable" -verbose up
+	go run ./cmd/migrate up
 
 migratedown:
-	migrate -path db/migration -database "$(DB_URL)" -verbose down
+	go run ./cmd/migrate down
 
 sqlc:
 	sqlc generate
 
 server:
-	go run main.go
+	go run ./cmd/todoapp
 
 test:
 	go test -v -cover ./...

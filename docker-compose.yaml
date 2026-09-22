@@ -19,6 +19,10 @@ services:
   app:
     build: .
     container_name: todoapp_server
+    # image 裡的 CMD 是 ./main，不會自動跑 migration——schema 變更跟啟動
+    # server 是兩件事，第一次啟動或有新 migration 時手動下：
+    #   docker compose run --rm app ./migrate
+    #
     # 掛進去的 app.env 蓋過 image 裡烤好的那份：同目錄下換一份 app.env，
     # 不用重新 build image 就能吃到正式環境的設定
     volumes:
@@ -33,5 +37,24 @@ services:
       postgres:
         condition: service_healthy
 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: todoapp_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@todoapp.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      # 預先註冊好連線設定（host/port/db），少打開一次就要重輸一次的麻煩；
+      # 密碼不放進去，連線時還是要手動輸入 postgres 密碼
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  pgadmin_data:

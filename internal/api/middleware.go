@@ -3,14 +3,13 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 
-	"todoapp/errcode"
+	"todoapp/internal/errcode"
 )
 
 const (
@@ -37,8 +36,8 @@ func requestIDMiddleware() gin.HandlerFunc {
 		ctx.Set(requestIDKey, requestID)
 		ctx.Writer.Header().Set(requestIDHeader, requestID)
 
-		logger := log.With().Str(requestIDKey, requestID).Logger()
-		ctx.Set(loggerKey, &logger)
+		logger := slog.Default().With(requestIDKey, requestID)
+		ctx.Set(loggerKey, logger)
 
 		ctx.Next()
 	}
@@ -58,17 +57,18 @@ func newRequestID() string {
 }
 
 // getLogger 取出這個請求專屬的 logger。handler 裡一律用它記 log——
-// 直接用全域的 log 的話，那行 log 就沒有 request_id，也就串不回是哪一次請求。
-func getLogger(ctx *gin.Context) *zerolog.Logger {
+// 直接用預設的 logger 的話，那行 log 就沒有 request_id，也就串不回是哪一次請求。
+func getLogger(ctx *gin.Context) *slog.Logger {
 	if v, exists := ctx.Get(loggerKey); exists {
-		if logger, ok := v.(*zerolog.Logger); ok {
+		if logger, ok := v.(*slog.Logger); ok {
 			return logger
 		}
 	}
-	return &log.Logger
+	return slog.Default()
 }
 
-// httpLogger 以 zerolog 記錄每一筆 HTTP 請求。
+// httpLogger 以 slog 記錄每一筆 HTTP 請求，包含這次回應的業務 code，
+// 排查時不用另外去翻 response body 才知道回了哪個碼。
 //
 // 工作放在 ctx.Next() 之後，因為要等整條鏈跑完才知道 status 與耗時。
 //
@@ -92,39 +92,40 @@ func httpLogger() gin.HandlerFunc {
 		statusCode := ctx.Writer.Status()
 		logger := getLogger(ctx)
 
-		event := logger.Info()
+		args := []any{
+			"protocol", "http",
+			"method", ctx.Request.Method,
+			"path", path,
+			"status_code", statusCode,
+			"status_text", http.StatusText(statusCode),
+			"client_ip", ctx.ClientIP(),
+			"duration", duration,
+		}
+		if len(ctx.Errors) > 0 {
+			args = append(args, "error", ctx.Errors.String())
+		}
+
 		switch {
 		case statusCode >= http.StatusInternalServerError:
-			event = logger.Error()
+			logger.Error("received a HTTP request", args...)
 		case statusCode >= http.StatusBadRequest:
-			event = logger.Warn()
+			logger.Warn("received a HTTP request", args...)
+		default:
+			logger.Info("received a HTTP request", args...)
 		}
-
-		if len(ctx.Errors) > 0 {
-			event = event.Str("error", ctx.Errors.String())
-		}
-
-		event.Str("protocol", "http").
-			Str("method", ctx.Request.Method).
-			Str("path", path).
-			Int("status_code", statusCode).
-			Str("status_text", http.StatusText(statusCode)).
-			Str("client_ip", ctx.ClientIP()).
-			Dur("duration", duration).
-			Msg("received a HTTP request")
 	}
 }
 
 // recoveryHandler 讓 panic 也走統一回應格式：client 收到的是
-// {"code":10001,...}，跟其他錯誤長得一樣，不會漏出 stack。
-// server 端該留的細節由 zerolog 記成帶 request_id 的一行
+// {"code":"E001",...}，跟其他錯誤長得一樣，不會漏出 stack。
+// server 端該留的細節由 slog 記成帶 request_id 的一行
 // （gin 自己還是會把可讀的 stack 印到 stderr）。
 func recoveryHandler(ctx *gin.Context, recovered any) {
-	getLogger(ctx).Error().
-		Interface("panic", recovered).
-		Str("method", ctx.Request.Method).
-		Str("path", ctx.Request.URL.Path).
-		Msg("panic recovered")
+	getLogger(ctx).Error("panic recovered",
+		"panic", recovered,
+		"method", ctx.Request.Method,
+		"path", ctx.Request.URL.Path,
+	)
 
 	failAbort(ctx, http.StatusInternalServerError, errcode.ErrInternal, nil)
 }

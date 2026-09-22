@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	db "todoapp/db/sqlc"
-	"todoapp/errcode"
+	db "todoapp/internal/db/sqlc"
+	"todoapp/internal/errcode"
 )
 
 func (server *Server) healthCheck(ctx *gin.Context) {
@@ -55,7 +55,7 @@ func (server *Server) createTodo(ctx *gin.Context) {
 		return
 	}
 
-	getLogger(ctx).Info().Int64("todo_id", todo.ID).Msg("todo created")
+	getLogger(ctx).Info("todo created", "todo_id", todo.ID)
 	ok(ctx, newTodoResponse(todo))
 }
 
@@ -223,11 +223,11 @@ func (server *Server) updateTodo(ctx *gin.Context) {
 		return
 	}
 
-	getLogger(ctx).Info().
-		Int64("todo_id", todo.ID).
-		Bool("title_changed", req.Title != nil).
-		Bool("completed_changed", req.Completed != nil).
-		Msg("todo updated")
+	getLogger(ctx).Info("todo updated",
+		"todo_id", todo.ID,
+		"title_changed", req.Title != nil,
+		"completed_changed", req.Completed != nil,
+	)
 	ok(ctx, newTodoResponse(todo))
 }
 
@@ -253,7 +253,7 @@ func (server *Server) deleteTodo(ctx *gin.Context) {
 		return
 	}
 
-	getLogger(ctx).Info().Int64("todo_id", req.ID).Msg("todo soft deleted")
+	getLogger(ctx).Info("todo soft deleted", "todo_id", req.ID)
 	// 統一回應格式之後不再回 204：204 規定不能有 body，
 	// 但現在連成功都要走 {code, msg, data}，兩者衝突。
 	// 讓「成功一律 200 + code 0」比省下一個 body 重要
@@ -289,10 +289,10 @@ func (server *Server) completeAllTodos(ctx *gin.Context) {
 	// 這行 log 的重點是 affected：批次操作出事時要先知道它動了幾筆。
 	// 影響 0 列不是錯誤（本來就全部都是那個狀態了），但看得到 0
 	// 跟看不到，排查時差很多
-	getLogger(ctx).Info().
-		Bool("completed", *req.Completed).
-		Int64("affected", rows).
-		Msg("all todos completion updated")
+	getLogger(ctx).Info("all todos completion updated",
+		"completed", *req.Completed,
+		"affected", rows,
+	)
 	ok(ctx, gin.H{"affected": rows})
 }
 
@@ -321,6 +321,6 @@ func (server *Server) deleteCompletedTodos(ctx *gin.Context) {
 		return
 	}
 
-	getLogger(ctx).Info().Int64("affected", rows).Msg("completed todos soft deleted")
+	getLogger(ctx).Info("completed todos soft deleted", "affected", rows)
 	ok(ctx, gin.H{"affected": rows})
 }

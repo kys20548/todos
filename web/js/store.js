@@ -21,7 +21,7 @@
         return fetch(url, options)
             .then(function (res) {
                 return res.json().then(function (payload) {
-                    if (payload.code !== 0)
+                    if (payload.code !== "E000")
                         throw new Error(payload.msg || "請求失敗");
 
                     return payload.data;
