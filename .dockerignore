@@ -1,0 +1,6 @@
+.git
+.idea
+.vscode
+*.out
+main
+template_golang_web

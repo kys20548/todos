@@ -3,13 +3,35 @@ services:
     image: postgres:16-alpine
     container_name: todoapp_db
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: todoapp
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d todoapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: todoapp_server
+    # 掛進去的 app.env 蓋過 image 裡烤好的那份：同目錄下換一份 app.env，
+    # 不用重新 build image 就能吃到正式環境的設定
+    volumes:
+      - ./app.env:/app/app.env:ro
+    # DB_SOURCE 另外用環境變數蓋，不寫在 app.env 裡：容器對容器要用 service
+    # 名稱 postgres，不是 localhost，而且密碼不該跟著 app.env 一起放在部署目錄明文管理
+    environment:
+      DB_SOURCE: ${DB_SOURCE:-postgresql://root:secret@postgres:5432/todoapp?sslmode=disable}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
