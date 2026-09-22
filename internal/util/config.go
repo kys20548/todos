@@ -9,7 +9,6 @@ import (
 // Config 保存應用程式所有設定，由 viper 從設定檔或環境變數讀取。
 type Config struct {
 	Environment       string        `mapstructure:"ENVIRONMENT"`
-	DBDriver          string        `mapstructure:"DB_DRIVER"`
 	DBSource          string        `mapstructure:"DB_SOURCE"`
 	HTTPServerAddress string        `mapstructure:"HTTP_SERVER_ADDRESS"`
 	ShutdownTimeout   time.Duration `mapstructure:"SHUTDOWN_TIMEOUT"`

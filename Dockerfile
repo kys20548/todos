@@ -14,7 +14,6 @@ WORKDIR /app
 
 COPY --from=builder /app/main .
 COPY --from=builder /app/migrate .
-COPY internal/db/migration ./internal/db/migration
 COPY app.env .
 COPY web ./web
 

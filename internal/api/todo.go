@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
-	db "todoapp/internal/db/sqlc"
+	db "todoapp/internal/db"
 	"todoapp/internal/errcode"
 )
 
@@ -75,7 +76,7 @@ func (server *Server) getTodo(ctx *gin.Context) {
 		// ErrNoRows 不是「系統壞了」，是「你要的東西不在」。
 		// 混進 ErrInternal 的話，查一筆不存在的資料會在 log 裡留一行 error，
 		// 值班的人會被一個正常情況叫起來
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(ctx, http.StatusNotFound, errcode.ErrTodoNotFound, nil)
 			return
 		}
@@ -213,9 +214,9 @@ func (server *Server) updateTodo(ctx *gin.Context) {
 
 	todo, err := server.store.UpdateTodo(ctx, arg)
 	if err != nil {
-		// UPDATE ... RETURNING 沒打到任何一列時，sqlc 的 :one 會回 ErrNoRows，
+		// 0 列被改動時 UpdateTodo 回 gorm.ErrRecordNotFound，
 		// 意思是這個 id 不存在或已被軟刪除，不是查詢失敗
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(ctx, http.StatusNotFound, errcode.ErrTodoNotFound, nil)
 			return
 		}

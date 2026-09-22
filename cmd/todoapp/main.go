@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,10 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"todoapp/internal/api"
-	db "todoapp/internal/db/sqlc"
+	db "todoapp/internal/db"
 	"todoapp/internal/util"
 )
 
@@ -34,14 +35,26 @@ func main() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	conn, err := sql.Open(config.DBDriver, config.DBSource)
+	// gorm 預設的 logger 會把每次查詢、甚至「查不到」都印成一行帶顏色的
+	// 純文字到 stdout，跟這支服務自己的 slog 結構化 log 是兩套不相干的
+	// 輸出格式，而且把「查不到」印成刺眼的錯誤，正是這個專案在 handler
+	// 那層已經刻意避免的事（一筆正常的 404 不該讓值班的人以為系統壞了）。
+	// 關掉它，交給 access log + handler 自己的 log 記
+	gormDB, err := gorm.Open(postgres.Open(config.DBSource), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
 	if err != nil {
 		logger.Error("cannot connect to db", "error", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		logger.Error("cannot get underlying sql.DB", "error", err)
+		os.Exit(1)
+	}
+	defer sqlDB.Close()
 
-	store := db.NewStore(conn)
+	store := db.NewStore(gormDB)
 
 	server, err := api.NewServer(config, store)
 	if err != nil {

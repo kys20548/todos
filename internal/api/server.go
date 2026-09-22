@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
-	db "todoapp/internal/db/sqlc"
+	db "todoapp/internal/db"
 	"todoapp/internal/util"
 )
 

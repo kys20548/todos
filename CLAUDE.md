@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Go backend for a todo app (gin + viper + sqlc + PostgreSQL), scaffolded from `template_golang_web` with `user` swapped for `todo`. Frontend is a TodoMVC (`javascript-es5`) build in `web/`, served by the same gin server. Layout follows the standard `cmd/`/`internal/`/`pkg/`/`third_party/` Go project convention; `pkg/` and `third_party/` are currently empty placeholders. No tests currently exist.
+Go backend for a todo app (gin + viper + gorm + PostgreSQL), scaffolded from `template_golang_web` with `user` swapped for `todo`. Frontend is a TodoMVC (`javascript-es5`) build in `web/`, served by the same gin server. Layout follows the standard `cmd/`/`internal/`/`pkg/`/`third_party/` Go project convention; `pkg/` and `third_party/` are currently empty placeholders. No tests currently exist.
 
 ## Commands
 
@@ -17,9 +17,7 @@ For local iteration without rebuilding the image:
 ```bash
 docker compose up -d postgres   # start only Postgres (make postgres)
 make migrateup                  # apply migrations (go run ./cmd/migrate up)
-make migratedown                # roll back migrations (go run ./cmd/migrate down)
 go run ./cmd/todoapp             # start server (make server) — must run from repo root, app.env/web/ are resolved relative to cwd
-make sqlc                       # regenerate internal/db/sqlc/ from internal/db/query/*.sql after editing queries
 make test                       # go test -v -cover ./...
 ```
 
@@ -28,23 +26,21 @@ Server reads config from `app.env` via viper (`util.LoadConfig`); any field can 
 ## Architecture
 
 ```
-cmd/todoapp/main.go     # load config → open DB → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
-cmd/migrate/main.go     # standalone migration command (up/down), not run as part of server startup
+cmd/todoapp/main.go     # load config → gorm.Open → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
+cmd/migrate/main.go     # standalone migration command (gorm AutoMigrate), not run as part of server startup
 internal/api/            # gin handlers, router, middleware, unified response envelope
 internal/errcode/        # business status codes
-internal/db/migration/   # golang-migrate SQL, also doubles as sqlc's schema source
-internal/db/query/       # sqlc query definitions (.sql)
-internal/db/sqlc/        # sqlc-generated code + hand-written Store interface (store.go)
+internal/db/              # gorm model (model.go) + hand-written Store interface/impl (store.go)
 internal/util/           # viper config loading
 web/                     # static frontend (TodoMVC), served directly by gin
 pkg/, third_party/       # empty placeholders — nothing in this project needs them yet
 ```
 
-`db.Store` embeds the sqlc-generated `Querier` interface (`internal/db/sqlc/store.go`); `SQLStore` wraps a `*sql.DB` and adds `execTx` for transactions. Handlers depend on `db.Store`, not the concrete struct, so it can be mocked in tests.
+`db.Store` is a small hand-written interface (`internal/db/store.go`) implemented by `GormStore`, which wraps a `*gorm.DB`. Handlers depend on `db.Store`, not the concrete struct, so it can be mocked in tests. The interface's method/param/result shapes were kept identical to the project's original sqlc-generated version on purpose, so switching the backing implementation didn't require touching `internal/api/todo.go` beyond its two `sql.ErrNoRows` → `gorm.ErrRecordNotFound` checks.
 
 ### Migration is a separate command, not part of server startup
 
-`cmd/migrate` links `golang-migrate` as a library (not the external CLI) and only does `Up`/`Down` against `internal/db/migration`. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
+`cmd/migrate` calls `db.AutoMigrate` (gorm's `AutoMigrate`, keyed off the `Todo` model in `internal/db/model.go`) — there are no more versioned `.sql` migration files. AutoMigrate only adds missing tables/columns/indexes; it never drops or alters existing ones, so there is no `down` command — rolling back means a manual DDL statement or restoring a backup. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
 
 ### Response envelope
 
@@ -68,7 +64,7 @@ Collection-level bulk operations (`PATCH /todos` = complete/uncomplete all, `DEL
 
 ### Soft delete
 
-`todos.deleted_at timestamptz` (migration 000002), not a boolean — one column answers both "deleted?" and "when?". Every query (get/list/update) filters `deleted_at IS NULL`; the delete queries themselves also filter on it, so a double-delete affects 0 rows and returns the same 404 as "never existed" rather than clobbering the original delete timestamp. API responses use `todoResponse` (not the raw `db.Todo` sqlc struct) specifically to avoid leaking `sql.NullTime`'s `{"Time":...,"Valid":false}` shape into the API contract.
+`Todo.DeletedAt` is `gorm.DeletedAt`, not a boolean — one column answers both "deleted?" and "when?". gorm automatically scopes every query to `deleted_at IS NULL` and makes `Delete()` set the timestamp instead of removing the row, so a double-delete affects 0 rows (`SoftDeleteTodo` returns 0 `RowsAffected`, handler turns that into the same 404 as "never existed") rather than clobbering the original delete timestamp. API responses use `todoResponse` (not the raw `db.Todo` gorm struct) specifically to avoid leaking `gorm.DeletedAt`'s `{"Time":...,"Valid":false}` shape into the API contract.
 
 ### List and summary are separate endpoints
 
