@@ -32,13 +32,28 @@ app 啟動自動跑——重啟 server 不該順便重跑一次 migration。`.sq
 - `./migrate force <version>`：只標記目前版本、不執行任何 SQL——schema 已經用別的方式建好
   （例如舊版用 gorm `AutoMigrate` 建的資料庫）、只是缺 `schema_migrations` 記錄時用
 
-本機開發想直接跑 server（不進 container）：指令要在專案根目錄執行，因為 server 讀 `app.env`、
+本機開發想直接跑 server（不進 container）：指令要在專案根目錄執行，因為 server 讀 `config/`、
 掛靜態檔都是用相對路徑：
 
 ```bash
 docker compose up -d postgres   # 只啟動資料庫
 make migrateup                  # 建立 / 更新資料表
-go run ./cmd/todoapp
+go run ./cmd/todoapp            # 等同 --env dev
 ```
 
-Server 預設監聽 `0.0.0.0:8080`（設定於 `app.env`，可用環境變數覆蓋）。
+### 切換環境設定
+
+設定檔依環境分成 `config/app.dev.env`、`config/app.qa.env`、`config/app.prod.env`，
+`todoapp` 和 `migrate` 都用 `--env`（或環境變數 `APP_ENV`）選要讀哪一份，沒給預設 `dev`，
+給了不在清單內的值（例如打錯成 `prd`）會直接啟動失敗：
+
+```bash
+go run ./cmd/todoapp --env qa
+go run ./cmd/migrate --env qa up
+make server ENV=qa                     # Makefile 用 ENV 帶進去
+APP_ENV=prod docker compose up -d      # docker compose 用 APP_ENV
+```
+
+`dev` 用人類可讀的文字 log、gin debug mode；`qa`、`prod` 用 JSON log、gin release mode。
+
+Server 預設監聽 `0.0.0.0:8080`（設定於 `config/app.<env>.env`，可用環境變數覆蓋）。

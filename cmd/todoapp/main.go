@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/urfave/cli/v3"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -19,15 +20,39 @@ import (
 )
 
 func main() {
-	config, err := util.LoadConfig(".")
+	cmd := &cli.Command{
+		Name:  "todoapp",
+		Usage: "todoapp HTTP server",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "env",
+				Usage:   "執行環境（dev / qa / prod），讀取 config/app.<env>.env",
+				Value:   util.EnvDev,
+				Sources: cli.EnvVars("APP_ENV"),
+			},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			run(cmd.String("env"))
+			return nil
+		},
+	}
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		slog.Error("todoapp failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(env string) {
+	config, err := util.LoadConfig("./config", env)
 	if err != nil {
 		slog.Error("cannot load config", "error", err)
 		os.Exit(1)
 	}
 
-	// development 環境輸出人類可讀的文字格式，production 輸出 JSON
+	// dev 環境輸出人類可讀的文字格式，qa / prod 輸出 JSON
 	var handler slog.Handler
-	if config.Environment == "development" {
+	if config.Environment == util.EnvDev {
 		handler = slog.NewTextHandler(os.Stderr, nil)
 	} else {
 		handler = slog.NewJSONHandler(os.Stderr, nil)
@@ -69,7 +94,7 @@ func main() {
 
 	// 在 goroutine 中啟動 server，main goroutine 負責監聽關閉訊號
 	go func() {
-		logger.Info("start HTTP server", "address", config.HTTPServerAddress)
+		logger.Info("start HTTP server", "env", config.Environment, "address", config.HTTPServerAddress)
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("cannot start server", "error", err)

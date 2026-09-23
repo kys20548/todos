@@ -14,7 +14,7 @@ WORKDIR /app
 
 COPY --from=builder /app/main .
 COPY --from=builder /app/migrate .
-COPY app.env .
+COPY config ./config
 COPY web ./web
 
 EXPOSE 8080

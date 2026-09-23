@@ -17,11 +17,11 @@ For local iteration without rebuilding the image:
 ```bash
 docker compose up -d postgres   # start only Postgres (make postgres)
 make migrateup                  # apply migrations (go run ./cmd/migrate up)
-go run ./cmd/todoapp             # start server (make server) — must run from repo root, app.env/web/ are resolved relative to cwd
+go run ./cmd/todoapp             # start server (make server) — must run from repo root, config/ and web/ are resolved relative to cwd
 make test                       # go test -v -cover ./...
 ```
 
-Server reads config from `app.env` via viper (`util.LoadConfig`); any field can be overridden by an environment variable of the same name (e.g. `DB_SOURCE`, `HTTP_SERVER_ADDRESS`).
+Config is per-environment: `config/app.{dev,qa,prod}.env`, selected by `--env <name>` (or `APP_ENV`) on both `todoapp` and `migrate`, defaulting to `dev`. Makefile passes `ENV` (`make server ENV=qa`); compose passes `APP_ENV` (`APP_ENV=qa docker compose up -d`). `util.LoadConfig(path, env)` rejects any name outside `dev`/`qa`/`prod` so a typo fails fast instead of silently loading nothing. `Config.Environment` is set from that `env` argument, not read from the file — there's no `ENVIRONMENT` key — so the flag and the file can't disagree; `dev` means text logs + gin debug mode, anything else JSON logs + release mode. Any field can still be overridden by an environment variable of the same name (e.g. `DB_SOURCE`, `HTTP_SERVER_ADDRESS`).
 
 ## Architecture
 

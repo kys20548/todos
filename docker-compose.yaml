@@ -24,13 +24,15 @@ services:
     # server 是兩件事，第一次啟動或有新 migration 時手動下：
     #   docker compose run --rm app ./migrate up
     #
-    # 掛進去的 app.env 蓋過 image 裡烤好的那份：同目錄下換一份 app.env，
-    # 不用重新 build image 就能吃到正式環境的設定
+    # 掛進去的 config/ 蓋過 image 裡烤好的那份：改設定檔不用重新 build image。
+    # 讀哪一份由 APP_ENV 決定（dev / qa / prod → config/app.<env>.env），
+    # 例如 APP_ENV=qa docker compose up -d
     volumes:
-      - ./app.env:/app/app.env:ro
-    # DB_SOURCE 另外用環境變數蓋，不寫在 app.env 裡：容器對容器要用 service
-    # 名稱 postgres，不是 localhost，而且密碼不該跟著 app.env 一起放在部署目錄明文管理
+      - ./config:/app/config:ro
+    # DB_SOURCE 另外用環境變數蓋，不寫在設定檔裡：容器對容器要用 service
+    # 名稱 postgres，不是 localhost，而且密碼不該跟著設定檔一起放在部署目錄明文管理
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       DB_SOURCE: ${DB_SOURCE:-postgresql://root:secret@postgres:5432/todoapp?sslmode=disable}
     ports:
       - "8080:8080"

@@ -7,14 +7,16 @@ createdb:
 dropdb:
 	docker exec -it todoapp_db dropdb todoapp
 
+ENV ?= dev
+
 migrateup:
-	go run ./cmd/migrate up
+	go run ./cmd/migrate --env $(ENV) up
 
 migratedown:
-	go run ./cmd/migrate down
+	go run ./cmd/migrate --env $(ENV) down
 
 server:
-	go run ./cmd/todoapp
+	go run ./cmd/todoapp --env $(ENV)
 
 test:
 	go test -v -cover ./...

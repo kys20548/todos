@@ -26,7 +26,7 @@ func NewServer(config util.Config, store db.Store) (*Server, error) {
 }
 
 func (server *Server) setupRouter() {
-	if server.config.Environment != "development" {
+	if server.config.Environment != util.EnvDev {
 		gin.SetMode(gin.ReleaseMode)
 	}
 

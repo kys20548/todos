@@ -39,8 +39,14 @@ func main() {
 		Usage: "todoapp 資料庫 schema migration",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Name:    "env",
+				Usage:   "執行環境（dev / qa / prod），讀取 config/app.<env>.env",
+				Value:   util.EnvDev,
+				Sources: cli.EnvVars("APP_ENV"),
+			},
+			&cli.StringFlag{
 				Name:  "database",
-				Usage: "資料庫連線字串，預設讀 app.env 的 DB_SOURCE",
+				Usage: "資料庫連線字串，有給就不讀設定檔；預設讀 config/app.<env>.env 的 DB_SOURCE",
 			},
 		},
 		Commands: []*cli.Command{
@@ -81,7 +87,7 @@ func runMigration(do func(*migrate.Migrate, *cli.Command) error) cli.ActionFunc 
 	return func(ctx context.Context, cmd *cli.Command) error {
 		dbSource := cmd.String("database")
 		if dbSource == "" {
-			config, err := util.LoadConfig(".")
+			config, err := util.LoadConfig("./config", cmd.String("env"))
 			if err != nil {
 				return fmt.Errorf("cannot load config: %w", err)
 			}
