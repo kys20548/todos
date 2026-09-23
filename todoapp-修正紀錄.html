@@ -75,8 +75,8 @@
   <header class="doc">
     <div class="eyebrow">Review Fixes · 修正紀錄</div>
     <h1>todoapp 修正紀錄</h1>
-    <div class="meta"><span>2026-09-22</span><span>作者 <b>danny</b></span></div>
-    <p class="lead">指導員看過第一版程式碼後開出五項修正，全部已完成；這篇記錄每項改了什麼、為什麼改，給後面接手的人看。</p>
+    <div class="meta"><span>2026-09-22</span><span>更新 2026-09-23</span><span>作者 <b>danny</b></span></div>
+    <p class="lead">指導員看過第一版程式碼後開出五項修正，全部已完成，之後再補上第六項設定檔依環境切換；這篇記錄每項改了什麼、為什麼改，給後面接手的人看。</p>
   </header>
 
   <section>
@@ -115,6 +115,24 @@
   <section>
     <div class="sec-head"><span class="sec-num">05</span><h2>資料庫 ORM：sqlc 換成 gorm</h2></div>
     <p>選擇跟大家一樣的就好</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><h2>設定檔：依環境用指令切換</h2></div>
+    <p>原本只有一份根目錄的 <code>app.env</code>，要換環境只能改檔案內容。改成每個環境一份，放在 <code>config/</code> 底下，啟動時用 <code>--env</code> 指定要讀哪一份：</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>變化</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td>設定檔</td><td><code>app.env</code> 拆成 <code>config/app.dev.env</code>、<code>config/app.qa.env</code>、<code>config/app.prod.env</code></td></tr>
+          <tr><td>選環境</td><td><code>todoapp</code> 跟 <code>migrate</code> 都吃 <code>--env dev|qa|prod</code>，也可以用環境變數 <code>APP_ENV</code>；沒給預設 <code>dev</code></td></tr>
+          <tr><td>防呆</td><td>不在清單內的值（例如打錯成 <code>prd</code>）直接啟動失敗，不會默默讀不到設定</td></tr>
+          <tr><td><code>ENVIRONMENT</code></td><td>從設定檔拿掉，改由 <code>--env</code> 決定，避免「用 qa 啟動、檔案卻寫 development」兩邊對不上；<code>dev</code> 用文字 log + gin debug mode，<code>qa</code>／<code>prod</code> 用 JSON log + release mode</td></tr>
+          <tr><td>Makefile／compose</td><td><code>make server ENV=qa</code>；<code>APP_ENV=qa docker compose up -d</code>，compose 改成掛整個 <code>./config</code> 目錄</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>注意：預設是 <code>dev</code>，image 不透過 compose 直接 <code>docker run</code> 又沒帶 <code>APP_ENV</code> 的話會吃到 dev 設定，部署 qa／prod 時要明確帶上。</p>
   </section>
 
 </main>
