@@ -18,6 +18,7 @@ services:
 
   app:
     build: .
+    image: todoapp-app:latest
     container_name: todoapp_server
     # image 裡的 CMD 是 ./main，不會自動跑 migration——schema 變更跟啟動
     # server 是兩件事，第一次啟動或有新 migration 時手動下：
