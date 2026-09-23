@@ -10,10 +10,13 @@ dropdb:
 migrateup:
 	go run ./cmd/migrate up
 
+migratedown:
+	go run ./cmd/migrate down
+
 server:
 	go run ./cmd/todoapp
 
 test:
 	go test -v -cover ./...
 
-.PHONY: postgres createdb dropdb migrateup server test
+.PHONY: postgres createdb dropdb migrateup migratedown server test

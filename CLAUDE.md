@@ -27,10 +27,11 @@ Server reads config from `app.env` via viper (`util.LoadConfig`); any field can 
 
 ```
 cmd/todoapp/main.go     # load config → gorm.Open → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
-cmd/migrate/main.go     # standalone migration command (gorm AutoMigrate), not run as part of server startup
+cmd/migrate/main.go     # standalone migration command (golang-migrate), not run as part of server startup
 internal/api/            # gin handlers, router, middleware, unified response envelope
 internal/errcode/        # business status codes
 internal/db/              # gorm model (model.go) + hand-written Store interface/impl (store.go)
+internal/db/migration/   # versioned .sql up/down files, go:embed'd into cmd/migrate
 internal/util/           # viper config loading
 web/                     # static frontend (TodoMVC), served directly by gin
 pkg/, third_party/       # empty placeholders — nothing in this project needs them yet
@@ -40,7 +41,12 @@ pkg/, third_party/       # empty placeholders — nothing in this project needs 
 
 ### Migration is a separate command, not part of server startup
 
-`cmd/migrate` calls `db.AutoMigrate` (gorm's `AutoMigrate`, keyed off the `Todo` model in `internal/db/model.go`) — there are no more versioned `.sql` migration files. AutoMigrate only adds missing tables/columns/indexes; it never drops or alters existing ones, so there is no `down` command — rolling back means a manual DDL statement or restoring a backup. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
+`cmd/migrate` uses `golang-migrate`, not gorm's `AutoMigrate` — the data layer (`internal/db/store.go`, `model.go`) stays on gorm for queries, but schema changes are versioned `.sql` up/down files in `internal/db/migration/`. Those files are `go:embed`'d into the `migrate` binary itself (`internal/db/migration/embed.go`), not read off disk at runtime, so the binary is self-contained and the Docker image needs no extra `COPY` for them. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
+
+Subcommands:
+- `up` — apply all pending migrations.
+- `down` — roll back every migration. **Destructive** (drops columns/tables) — never run against a real environment without a backup.
+- `force <version>` — mark the current version without running any SQL. Needed once for any database whose schema was created a different way (e.g. an older deployment that used gorm `AutoMigrate`, which never wrote a `schema_migrations` row) — otherwise `up` tries to re-run `000001_init_schema` and fails on "relation already exists".
 
 ### Response envelope
 

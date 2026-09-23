@@ -58,13 +58,6 @@ func NewStore(db *gorm.DB) Store {
 	return &GormStore{db: db}
 }
 
-// AutoMigrate 建立 / 更新 todos 資料表，讓 schema 對齊 Todo 這個 model。
-// 跟 cmd/todoapp 的啟動流程分開，只透過 cmd/migrate 手動呼叫——見
-// cmd/migrate 的註解。
-func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&Todo{})
-}
-
 func (s *GormStore) CreateTodo(ctx context.Context, title string) (Todo, error) {
 	todo := Todo{Title: title}
 	err := s.db.WithContext(ctx).Create(&todo).Error
