@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Todo 專案啟動摘要</title>
+<style>
+  :root{
+    --bg:#f5f6f8;
+    --surface:#ffffff;
+    --surface-2:#eef0f4;
+    --ink:#1b1f27;
+    --ink-dim:#5b6270;
+    --line:#dde1e8;
+    --accent:#1c6e8c;
+    --accent-ink:#ffffff;
+    --accent-soft:#e4eef2;
+    --done-bg:#e3f3ea;
+    --done-ink:#1f7a45;
+    --plan-bg:#fbeee0;
+    --plan-ink:#9a5a12;
+    --get:#1c6e8c; --get-bg:#e4eef2;
+    --post:#1f7a45; --post-bg:#e3f3ea;
+    --patch:#9a5a12; --patch-bg:#fbeee0;
+    --delete:#b3382c; --delete-bg:#fbe7e4;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171c; --surface:#1b1f27; --surface-2:#20242d;
+      --ink:#e7e9ee; --ink-dim:#9aa1ae; --line:#2d323c;
+      --accent:#5bb6d6; --accent-ink:#0c1216; --accent-soft:#1c3b45;
+      --done-bg:#173324; --done-ink:#6fcf97;
+      --plan-bg:#3a2c14; --plan-ink:#e0a34e;
+      --get:#5bb6d6; --get-bg:#1c3b45;
+      --post:#6fcf97; --post-bg:#173324;
+      --patch:#e0a34e; --patch-bg:#3a2c14;
+      --delete:#f08a7d; --delete-bg:#3d1f1a;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171c; --surface:#1b1f27; --surface-2:#20242d;
+    --ink:#e7e9ee; --ink-dim:#9aa1ae; --line:#2d323c;
+    --accent:#5bb6d6; --accent-ink:#0c1216; --accent-soft:#1c3b45;
+    --done-bg:#173324; --done-ink:#6fcf97;
+    --plan-bg:#3a2c14; --plan-ink:#e0a34e;
+    --get:#5bb6d6; --get-bg:#1c3b45;
+    --post:#6fcf97; --post-bg:#173324;
+    --patch:#e0a34e; --patch-bg:#3a2c14;
+    --delete:#f08a7d; --delete-bg:#3d1f1a;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.7;
+    padding:48px 16px 64px;
+  }
+  main{ max-width:760px; margin:0 auto; }
+
+  header.doc{ border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:36px; }
+  .eyebrow{ font-family:var(--mono); font-size:12px; letter-spacing:.12em; color:var(--accent); text-transform:uppercase; margin-bottom:10px; }
+  h1{ font-size:26px; font-weight:700; margin:0 0 8px; text-wrap:balance; }
+  .meta{ display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:var(--ink-dim); }
+  .meta span b{ color:var(--ink); font-weight:600; }
+
+  section{ margin-bottom:40px; }
+  .sec-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:16px; }
+  .sec-num{ font-family:var(--mono); font-size:13px; color:var(--accent); }
+  h2{ font-size:17px; font-weight:700; margin:0; }
+  .sec-note{ font-size:13px; color:var(--ink-dim); margin:-8px 0 16px; }
+  code{ font-family:var(--mono); }
+
+  .scope-grid{ display:grid; gap:8px; }
+  .scope-item{ display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:11px 14px; }
+  .badge{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.03em; padding:3px 8px; border-radius:5px; white-space:nowrap; flex-shrink:0; }
+  .badge.done{ background:var(--done-bg); color:var(--done-ink); }
+  .badge.plan{ background:var(--plan-bg); color:var(--plan-ink); }
+  .scope-text{ font-size:14px; }
+  .scope-text .sub{ display:block; font-size:12.5px; color:var(--ink-dim); margin-top:2px; }
+
+  .table-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+  table{ width:100%; border-collapse:collapse; background:var(--surface); font-size:13.5px; }
+  th, td{ padding:10px 14px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tr:last-child td{ border-bottom:none; }
+  th{ background:var(--surface-2); font-size:12px; color:var(--ink-dim); font-weight:600; letter-spacing:.02em; }
+  td code, th code{ font-size:12.5px; }
+  td.wrap, th.wrap{ white-space:normal; }
+
+  .ep-list{ display:grid; gap:8px; }
+  .ep-row{ display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:11px 14px; flex-wrap:wrap; }
+  .method{ font-family:var(--mono); font-size:11px; font-weight:700; padding:3px 9px; border-radius:5px; flex-shrink:0; width:58px; text-align:center; }
+  .method.get{ background:var(--get-bg); color:var(--get); }
+  .method.post{ background:var(--post-bg); color:var(--post); }
+  .method.patch{ background:var(--patch-bg); color:var(--patch); }
+  .method.delete{ background:var(--delete-bg); color:var(--delete); }
+  .path{ font-family:var(--mono); font-size:13.5px; flex-shrink:0; }
+  .ep-desc{ font-size:12.5px; color:var(--ink-dim); margin-left:auto; }
+
+  footer{ margin-top:48px; padding-top:16px; border-top:1px solid var(--line); font-size:12px; color:var(--ink-dim); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+
+  @media (max-width:480px){
+    .ep-desc{ margin-left:0; }
+    body{ padding:32px 16px 48px; }
+    h1{ font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header class="doc">
+    <div class="eyebrow">Before Start · 檢查會談前摘要</div>
+    <h1>Todo 專案</h1>
+    <div class="meta">
+      <span>作者 <b>Danny</b></span>
+      <span>骨架 <b>template_golang_web</b></span>
+      <span>技術 <b>Gin · gorm · PostgreSQL · TodoMVC(javascript-es5)</b></span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>功能範圍</h2></div>
+    <div class="scope-grid">
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">新增 / 查詢單筆 / 查詢列表（分頁、狀態篩選）</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">列表統計 summary（total / active / completed，全域計數）</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">部分更新（title / completed，至少帶一項）</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">全選完成 / 取消完成、清除已完成（批次操作）</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">刪除（軟刪除，deleted_at 標記）</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">統一回應格式、錯誤碼、request_id 貫穿日誌</span></div>
+      <div class="scope-item"><span class="badge done">已完成</span><span class="scope-text">前端串接<span class="sub">TodoMVC（examples/javascript-es5），放在 web/，由 Gin 同一個 server 靜態服務</span></span></div>
+      <div class="scope-item"><span class="badge plan">計畫中</span><span class="scope-text">還原已刪除 todo<span class="sub">PUT /todos/:id/restore</span></span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>資料表</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>欄位</th><th>型別</th><th class="wrap">限制 / 預設</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td><code>bigserial</code></td><td class="wrap">PRIMARY KEY</td></tr>
+          <tr><td><code>title</code></td><td><code>varchar</code></td><td class="wrap">NOT NULL</td></tr>
+          <tr><td><code>completed</code></td><td><code>boolean</code></td><td class="wrap">NOT NULL DEFAULT false</td></tr>
+          <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td class="wrap">NOT NULL DEFAULT now()</td></tr>
+          <tr><td><code>deleted_at</code></td><td><code>timestamptz</code></td><td class="wrap">nullable（migration 000002，軟刪除用）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>API 端點</h2></div>
+    <div class="sec-note">回應統一為 <code>{code, msg, data}</code></div>
+    <div class="ep-list">
+      <div class="ep-row"><span class="method get">GET</span><span class="path">/healthz</span><span class="ep-desc">健康檢查</span></div>
+      <div class="ep-row"><span class="method post">POST</span><span class="path">/todos</span><span class="ep-desc">新增</span></div>
+      <div class="ep-row"><span class="method get">GET</span><span class="path">/todos/:id</span><span class="ep-desc">單筆</span></div>
+      <div class="ep-row"><span class="method get">GET</span><span class="path">/todos?status=&amp;page_id=&amp;page_size=</span><span class="ep-desc">列表</span></div>
+      <div class="ep-row"><span class="method get">GET</span><span class="path">/todos-summary</span><span class="ep-desc">統計（獨立端點，不跑列表查詢）</span></div>
+      <div class="ep-row"><span class="method patch">PATCH</span><span class="path">/todos</span><span class="ep-desc">全選完成 / 取消完成</span></div>
+      <div class="ep-row"><span class="method delete">DELETE</span><span class="path">/todos?status=completed</span><span class="ep-desc">清除已完成</span></div>
+      <div class="ep-row"><span class="method patch">PATCH</span><span class="path">/todos/:id</span><span class="ep-desc">部分更新</span></div>
+      <div class="ep-row"><span class="method delete">DELETE</span><span class="path">/todos/:id</span><span class="ep-desc">軟刪除</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>錯誤分類</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>碼</th><th>HTTP</th><th>常數</th><th class="wrap">觸發條件</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>E000</code></td><td>200</td><td><code>Success</code></td><td class="wrap">成功</td></tr>
+          <tr><td><code>E001</code></td><td>500</td><td><code>ErrInternal</code></td><td class="wrap">系統內部錯誤（DB 錯誤、panic）</td></tr>
+          <tr><td><code>E002</code></td><td>400</td><td><code>ErrInvalidParams</code></td><td class="wrap">參數錯誤（binding 失敗）</td></tr>
+          <tr><td><code>E003</code></td><td>404</td><td><code>ErrNotFound</code></td><td class="wrap">路由不存在</td></tr>
+          <tr><td><code>E101</code></td><td>404</td><td><code>ErrTodoNotFound</code></td><td class="wrap">todo 不存在或已被軟刪除</td></tr>
+          <tr><td><code>E102</code></td><td>400</td><td><code>ErrTodoNoFieldsToUpdate</code></td><td class="wrap">PATCH 未帶任何要更新的欄位</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="sec-note" style="margin-top:12px">段別：E000 成功、E0xx 通用、E1xx todo；E2xx / E3xx 保留給後續模組。碼與訊息一起宣告成 <code>Code{ID, Msg}</code>（internal/errcode/errcode.go），只定義真的有分支會回傳的碼</div>
+  </section>
+
+  <footer>
+    <span>PostgreSQL（docker compose）· gin + viper + gorm · 前後端同一個 server</span>
+    <span>下一階段：02 搬資料庫</span>
+  </footer>
+
+</main>
+</body>
+</html>

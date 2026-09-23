@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>todoapp 修正紀錄</title>
+<style>
+  :root{
+    --bg:#f5f6f8;
+    --surface:#ffffff;
+    --surface-2:#eef0f4;
+    --ink:#1b1f27;
+    --ink-dim:#5b6270;
+    --line:#dde1e8;
+    --accent:#1c6e8c;
+    --code-bg:#eef0f4;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171c; --surface:#1b1f27; --surface-2:#20242d;
+      --ink:#e7e9ee; --ink-dim:#9aa1ae; --line:#2d323c;
+      --accent:#5bb6d6; --code-bg:#262b35;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171c; --surface:#1b1f27; --surface-2:#20242d;
+    --ink:#e7e9ee; --ink-dim:#9aa1ae; --line:#2d323c;
+    --accent:#5bb6d6; --code-bg:#262b35;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.7;
+    padding:48px 16px 64px;
+  }
+  main{ max-width:760px; margin:0 auto; }
+
+  header.doc{ border-bottom:2px solid var(--ink); padding-bottom:20px; margin-bottom:36px; }
+  .eyebrow{ font-family:var(--mono); font-size:12px; letter-spacing:.12em; color:var(--accent); text-transform:uppercase; margin-bottom:10px; }
+  h1{ font-size:26px; font-weight:700; margin:0 0 8px; text-wrap:balance; }
+  .meta{ display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:var(--ink-dim); margin-bottom:14px; }
+  .meta b{ color:var(--ink); font-weight:600; }
+  .lead{ margin:0; }
+
+  section{ margin-bottom:36px; }
+  .sec-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; }
+  .sec-num{ font-family:var(--mono); font-size:13px; color:var(--accent); }
+  h2{ font-size:17px; font-weight:700; margin:0; }
+  p{ margin:0 0 10px; }
+  code{ font-family:var(--mono); font-size:.88em; background:var(--code-bg); padding:1px 5px; border-radius:4px; }
+
+  .table-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:8px; margin:12px 0; }
+  table{ width:100%; border-collapse:collapse; background:var(--surface); font-size:13.5px; }
+  th, td{ padding:10px 14px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:last-child td{ border-bottom:none; }
+  th{ background:var(--surface-2); font-size:12px; color:var(--ink-dim); font-weight:600; letter-spacing:.02em; }
+  td:first-child{ white-space:nowrap; }
+
+  @media (max-width:480px){
+    body{ padding:32px 16px 48px; }
+    h1{ font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header class="doc">
+    <div class="eyebrow">Review Fixes · 修正紀錄</div>
+    <h1>todoapp 修正紀錄</h1>
+    <div class="meta"><span>2026-09-22</span><span>作者 <b>danny</b></span></div>
+    <p class="lead">指導員看過第一版程式碼後開出五項修正，全部已完成；這篇記錄每項改了什麼、為什麼改，給後面接手的人看。</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>錯誤代碼：改成物件包裝</h2></div>
+    <p>原本 <code>errcode.Code</code> 是 int 常數，訊息另外放在一個獨立的 <code>map[Code]string</code> 裡維護，兩邊要一起改、容易漏改一邊。改成 <code>Code{ID, Msg}</code> 這個物件，一個變數宣告同時帶碼跟訊息，格式也從數字改成字串：<code>E000</code> 成功、<code>E0xx</code> 通用錯誤、<code>E1xx</code> todo 專用。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>資料夾結構與指令化</h2></div>
+    <p>整個專案改成標準 Go 專案的 <code>cmd/</code>、<code>internal/</code>、<code>pkg/</code>、<code>third_party/</code> 慣例：</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>變化</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td>進入點</td><td><code>main.go</code> 搬進 <code>cmd/todoapp/main.go</code></td></tr>
+          <tr><td>內部套件</td><td><code>api/</code>、<code>db/</code>、<code>errcode/</code>、<code>util/</code> 全部搬進 <code>internal/</code>（本來就不打算給外部 import）</td></tr>
+          <tr><td><code>pkg/</code>、<code>third_party/</code></td><td>建空資料夾占位，目前沒有東西適合放進去</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>用 urfave/cli 包成一支正常的 CLI</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>日誌：zerolog 換成 log/slog</h2></div>
+    <p><code>zerolog</code> 全部換成標準庫 <code>log/slog</code></p>
+    <p><code>go.mod</code> 也把 <code>rs/zerolog</code> 這顆依賴拿掉。額外發現 gorm 預設的 logger 會把每次「查不到」印成一行帶顏色的純文字到 stdout，跟服務自己的 slog 結構化 log 是兩套不相干的格式，而且把正常的 404 印成刺眼的錯誤，順便把它關掉（<code>LogMode(Silent)</code>），交給 access log 自己記。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>容器：docker-compose 加 pgAdmin</h2></div>
+    <p><code>docker-compose.yaml</code> 新增 <code>pgadmin</code> service（<code>dpage/pgadmin4</code>）</p>
+    <p>現在 <code>docker compose up -d --build</code> 會同時啟動 3 個 service：<code>postgres</code>、<code>app</code>、<code>pgadmin</code>。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>資料庫 ORM：sqlc 換成 gorm</h2></div>
+    <p>選擇跟大家一樣的就好</p>
+  </section>
+
+</main>
+</body>
+</html>
