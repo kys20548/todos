@@ -175,15 +175,12 @@
     View.prototype.bind = function (event, handler) {
         var self = this;
         if (event === "newTodo") {
-            // change 只在欄位失焦時觸發，按 Enter 不會自動失焦，所以另外
-            // 綁 keyup 判斷 Enter；clearNewTodo 事後會把值清空，
-            // 就算兩個事件都觸發，第二次也會被 addItem 的空字串檢查擋掉。
+            // 只綁 change：text input 按 Enter 本身就會觸發 change。
+            // 不能再另外綁 keyup(Enter)——clearNewTodo 要等 POST 回來才清空
+            // 輸入框，兩個事件會在那之前各送一次，資料就重複新增。
+            // 也不用 keyup：中文輸入法按 Enter 選字時 keyCode 可能也是 13，會誤送。
             $on(self.$newTodo, "change", function () {
                 handler(self.$newTodo.value);
-            });
-            $on(self.$newTodo, "keyup", function (event) {
-                if (event.keyCode === self.ENTER_KEY)
-                    handler(self.$newTodo.value);
             });
         } else if (event === "removeCompleted") {
             $on(self.$clearCompleted, "click", function () {
