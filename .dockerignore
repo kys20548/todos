@@ -1,6 +1,19 @@
 .git
 .idea
 .vscode
+.claude
 *.out
 main
 template_golang_web
+# 離線包與打包產物，不要被 COPY . . 吃進 build context
+*.tar
+*.tar.gz
+*.tgz
+SHA256SUMS
+# 與 image 無關的目錄/檔案
+第*週報告
+pgadmin
+deploy
+docker-compose*.yaml
+.env
+.env.*

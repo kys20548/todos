@@ -1,19 +1,14 @@
-// migrate 是獨立於 todoapp server 的 schema migration 指令，用 urfave/cli
-// 包成一支正常的 CLI（--help、子命令、flag），單獨執行就能用，不用透過
-// Makefile 或 docker compose 才知道怎麼呼叫它。
+package main
+
+// migrate 是獨立於 HTTP server 的 schema migration 子命令，單獨執行就能用，
+// 不跟 serve 的啟動流程綁在一起：server 重啟（crash、redeploy、
+// docker compose restart）不等於 schema 變更，混在一起會讓每次重啟都重跑
+// migration，多一個跟 server 本身無關的失敗點。
 //
 // 底層是 golang-migrate，帶版本號的 .sql up/down 檔案（internal/db/migration），
 // 而不是 gorm 的 AutoMigrate——AutoMigrate 只能新增欄位、不能刪欄位或改型別，
-// 沒辦法真正回滾。這裡的 .sql 檔案透過 internal/db/migration 這個套件用
-// go:embed 編進這支執行檔本身，不是執行時去讀磁碟上的路徑，所以 binary
-// 丟到哪都能單獨跑，跟 docker compose run --rm app ./migrate up 這種用法
-// 完全相容。
-//
-// 拿掉 entrypoint.sh 那套「容器啟動時自動跑 migration」的做法：schema
-// 變更跟「啟動 server」是兩件不同的事，混在一起會讓 server 沒事重啟
-// 一次（例如 docker compose restart、平台自動重啟）也跟著重跑一次
-// migration，多一個不必要的失敗點。
-package main
+// 沒辦法真正回滾。.sql 檔案透過 internal/db/migration 用 go:embed 編進執行檔
+// 本身，所以 binary / image 丟到哪都能單獨跑。
 
 import (
 	"context"
@@ -21,7 +16,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
 	"strconv"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -33,17 +27,11 @@ import (
 	"todoapp/internal/util"
 )
 
-func main() {
-	cmd := &cli.Command{
+func migrateCommand() *cli.Command {
+	return &cli.Command{
 		Name:  "migrate",
-		Usage: "todoapp 資料庫 schema migration",
+		Usage: "資料庫 schema migration（一次性指令）",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "env",
-				Usage:   "執行環境（dev / qa / prod），讀取 config/app.<env>.env",
-				Value:   util.EnvDev,
-				Sources: cli.EnvVars("APP_ENV"),
-			},
 			&cli.StringFlag{
 				Name:  "database",
 				Usage: "資料庫連線字串，有給就不讀設定檔；預設讀 config/app.<env>.env 的 DB_SOURCE",
@@ -73,11 +61,6 @@ func main() {
 				}),
 			},
 		},
-	}
-
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		slog.Error("migrate failed", "error", err)
-		os.Exit(1)
 	}
 }
 

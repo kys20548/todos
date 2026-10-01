@@ -1,5 +1,5 @@
 postgres:
-	docker compose up -d
+	docker compose -f docker-compose.local.yaml up -d db
 
 createdb:
 	docker exec -it todoapp_db createdb --username=root --owner=root todoapp
@@ -10,13 +10,13 @@ dropdb:
 ENV ?= dev
 
 migrateup:
-	go run ./cmd/migrate --env $(ENV) up
+	go run ./cmd/todoapp --env $(ENV) migrate up
 
 migratedown:
-	go run ./cmd/migrate --env $(ENV) down
+	go run ./cmd/todoapp --env $(ENV) migrate down
 
 server:
-	go run ./cmd/todoapp --env $(ENV)
+	go run ./cmd/todoapp --env $(ENV) serve
 
 test:
 	go test -v -cover ./...

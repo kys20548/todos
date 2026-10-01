@@ -8,30 +8,43 @@ Go backend for a todo app (gin + viper + gorm + PostgreSQL), scaffolded from `te
 
 ## Commands
 
+The app is one binary, `todoapp`, with three subcommands: `serve`, `migrate`, `worker`. All three run from the same Docker image and are told apart only by compose `command:`.
+
 ```bash
-docker compose up -d --build            # start Postgres + app + pgAdmin
-docker compose run --rm app ./migrate up   # apply migrations — separate from app startup on purpose, see below
+docker compose -f docker-compose.local.yaml up -d --build   # laptop: db + migrate + serve + worker + pgAdmin
 ```
 
 For local iteration without rebuilding the image:
 ```bash
-docker compose up -d postgres   # start only Postgres (make postgres)
-make migrateup                  # apply migrations (go run ./cmd/migrate up)
-go run ./cmd/todoapp             # start server (make server) — must run from repo root, config/ and web/ are resolved relative to cwd
+make postgres                   # start only the db from docker-compose.local.yaml
+make migrateup                  # apply migrations (go run ./cmd/todoapp --env dev migrate up)
+make server                     # go run ./cmd/todoapp --env dev serve — must run from repo root, config/ and web/ are resolved relative to cwd
+go run ./cmd/todoapp worker event   # demo worker: logs todo counts every --interval (default 30s), exits cleanly on SIGTERM
 make test                       # go test -v -cover ./...
 ```
 
-Config is per-environment: `config/app.{dev,qa,prod}.env`, selected by `--env <name>` (or `APP_ENV`) on both `todoapp` and `migrate`, defaulting to `dev`. Makefile passes `ENV` (`make server ENV=qa`); compose passes `APP_ENV` (`APP_ENV=qa docker compose up -d`). `util.LoadConfig(path, env)` rejects any name outside `dev`/`qa`/`prod` so a typo fails fast instead of silently loading nothing. `Config.Environment` is set from that `env` argument, not read from the file — there's no `ENVIRONMENT` key — so the flag and the file can't disagree; `dev` means text logs + gin debug mode, anything else JSON logs + release mode. Any field can still be overridden by an environment variable of the same name (e.g. `DB_SOURCE`, `HTTP_SERVER_ADDRESS`).
+### Compose files
+
+- `docker-compose.yaml` — deployed on the **jump** host: `migrate` (`restart: "no"`), `serve` and `worker` (`unless-stopped`), sharing one image. `DB_SOURCE` is required (from `.env`) and points at the db host's internal IP; across machines a compose service name does not resolve.
+- `deploy/db/docker-compose.yaml` — deployed on the **devbox** (internal, no internet): only postgres, port bound to the internal IP, not `0.0.0.0`.
+- `docker-compose.local.yaml` — laptop only, adds a `db` service and pgAdmin.
+- `.env.example` documents the variables; `.env` is gitignored.
+- Offline delivery: `docker save` → copy via the jump host → `docker load`. Build output goes in `dist/` (gitignored).
+
+Config is per-environment: `config/app.{dev,qa,prod}.env`, selected by the global `--env <name>` flag (or `APP_ENV`), placed before the subcommand (`todoapp --env qa serve`), defaulting to `dev`. Makefile passes `ENV` (`make server ENV=qa`); compose passes `APP_ENV` (`APP_ENV=qa docker compose up -d`). `util.LoadConfig(path, env)` rejects any name outside `dev`/`qa`/`prod` so a typo fails fast instead of silently loading nothing. `Config.Environment` is set from that `env` argument, not read from the file — there's no `ENVIRONMENT` key — so the flag and the file can't disagree; `dev` means text logs + gin debug mode, anything else JSON logs + release mode. Any field can still be overridden by an environment variable of the same name (e.g. `DB_SOURCE`, `HTTP_SERVER_ADDRESS`).
 
 ## Architecture
 
 ```
-cmd/todoapp/main.go     # load config → gorm.Open → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
-cmd/migrate/main.go     # standalone migration command (golang-migrate), not run as part of server startup
+cmd/todoapp/main.go     # root urfave/cli command, global --env flag, registers the three subcommands
+cmd/todoapp/serve.go    # serve [--port]: load config → gorm.Open → db.NewStore → api.NewServer → graceful shutdown on SIGINT/SIGTERM
+cmd/todoapp/migrate.go  # migrate up|down|force (golang-migrate), a one-shot command, not run as part of server startup
+cmd/todoapp/worker.go   # worker event: demo background worker (periodic todo count log)
+cmd/todoapp/common.go   # logger setup + gorm.Open shared by serve and worker
 internal/api/            # gin handlers, router, middleware, unified response envelope
 internal/errcode/        # business status codes
 internal/db/              # gorm model (model.go) + hand-written Store interface/impl (store.go)
-internal/db/migration/   # versioned .sql up/down files, go:embed'd into cmd/migrate
+internal/db/migration/   # versioned .sql up/down files, go:embed'd into the todoapp binary
 internal/util/           # viper config loading
 web/                     # static frontend (TodoMVC), served directly by gin
 pkg/, third_party/       # empty placeholders — nothing in this project needs them yet
@@ -41,7 +54,7 @@ pkg/, third_party/       # empty placeholders — nothing in this project needs 
 
 ### Migration is a separate command, not part of server startup
 
-`cmd/migrate` uses `golang-migrate`, not gorm's `AutoMigrate` — the data layer (`internal/db/store.go`, `model.go`) stays on gorm for queries, but schema changes are versioned `.sql` up/down files in `internal/db/migration/`. Those files are `go:embed`'d into the `migrate` binary itself (`internal/db/migration/embed.go`), not read off disk at runtime, so the binary is self-contained and the Docker image needs no extra `COPY` for them. The Docker image's `CMD` is just `./main` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm app ./migrate up` in a container, `go run ./cmd/migrate up` locally, or just `./migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
+`todoapp migrate` uses `golang-migrate`, not gorm's `AutoMigrate` — the data layer (`internal/db/store.go`, `model.go`) stays on gorm for queries, but schema changes are versioned `.sql` up/down files in `internal/db/migration/`. Those files are `go:embed`'d into the `todoapp` binary itself (`internal/db/migration/embed.go`), not read off disk at runtime, so the binary is self-contained and the Docker image needs no extra `COPY` for them. The Docker image's `ENTRYPOINT` is `./todoapp` with default `CMD ["serve","--port","8080"]` — no `entrypoint.sh` wrapper that runs migration before exec'ing the server; in compose, `migrate` is its own service with `restart: "no"` and `serve`/`worker` wait for it via `condition: service_completed_successfully`. Reason: an app restart (crash, redeploy, `docker compose restart`) is not the same event as "schema changed," and coupling them means every ordinary restart re-runs migration and can fail for reasons that have nothing to do with the server itself. Run it explicitly: `docker compose run --rm migrate` in a container, `make migrateup` / `go run ./cmd/todoapp migrate up` locally, or just `./todoapp migrate up` if you have the binary — it's a plain CLI (`--help` works), not something that only makes sense wrapped in Make/compose.
 
 Subcommands:
 - `up` — apply all pending migrations.

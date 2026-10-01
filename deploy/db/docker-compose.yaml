@@ -1,0 +1,24 @@
+# devbox（內網機）上的部署檔：只有資料庫。
+# 在這個目錄放 .env（範本見 ../../.env.example）後：docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: todoapp_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
+    ports:
+      # 只綁內網 IP，jump 才連得到；不綁 0.0.0.0，避免暴露到其他網卡
+      - "${DB_BIND_IP:-10.140.0.29}:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

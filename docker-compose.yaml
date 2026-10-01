@@ -1,63 +1,46 @@
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: todoapp_db
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-root}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
-      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d todoapp"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+# jump（跳板機）上的部署檔：只放 migrate / serve / worker 三個執行單位。
+# 資料庫在 devbox（內網機），見 deploy/db/docker-compose.yaml；
+# 本機一次起完整環境（含 db）請用 docker-compose.local.yaml。
+#
+# 三個單位共用同一個 image，靠 command 區分（image 的 ENTRYPOINT 是 ./todoapp）。
+x-app: &app
+  image: todoapp:1.0
+  environment:
+    APP_ENV: ${APP_ENV:-prod}
+    # 必填，寫在 .env（不進 git，範本見 .env.example）。
+    # 跨機器連線不能用 service 名稱，要寫 devbox 的內網 IP。
+    DB_SOURCE: ${DB_SOURCE:?DB_SOURCE is required, see .env.example}
 
-  app:
-    build: .
-    image: todoapp-app:latest
-    container_name: todoapp_server
-    # image 裡的 CMD 是 ./main，不會自動跑 migration——schema 變更跟啟動
-    # server 是兩件事，第一次啟動或有新 migration 時手動下：
-    #   docker compose run --rm app ./migrate up
-    #
-    # 掛進去的 config/ 蓋過 image 裡烤好的那份：改設定檔不用重新 build image。
-    # 讀哪一份由 APP_ENV 決定（dev / qa / prod → config/app.<env>.env），
-    # 例如 APP_ENV=qa docker compose up -d
-    volumes:
-      - ./config:/app/config:ro
-    # DB_SOURCE 另外用環境變數蓋，不寫在設定檔裡：容器對容器要用 service
-    # 名稱 postgres，不是 localhost，而且密碼不該跟著設定檔一起放在部署目錄明文管理
-    environment:
-      APP_ENV: ${APP_ENV:-dev}
-      DB_SOURCE: ${DB_SOURCE:-postgresql://root:secret@postgres:5432/todoapp?sslmode=disable}
+services:
+  # 一次性：跑完就退出，restart "no"。schema 變更與 server 啟動是兩件事，
+  # 重啟 serve 不會重跑 migration；有新 migration 時：
+  #   docker compose run --rm migrate
+  # 或第一次部署時 docker compose up -d 會先跑它一次。
+  migrate:
+    <<: *app
+    command: ["migrate", "up"]
+    restart: "no"
+
+  serve:
+    <<: *app
+    command: ["serve", "--port", "8080"]
+    restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/todos-summary"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: todoapp_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@todoapp.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-      # 預先註冊好連線設定（host/port/db），少打開一次就要重輸一次的麻煩；
-      # 密碼不放進去，連線時還是要手動輸入 postgres 密碼
-      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+  worker:
+    <<: *app
+    command: ["worker", "event"]
+    restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
-  pgadmin_data:
+      migrate:
+        condition: service_completed_successfully

@@ -10,3 +10,5 @@ template_golang_web
 .env
 *.tar
 *.gz
+*.tgz
+dist/

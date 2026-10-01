@@ -1,0 +1,77 @@
+# 本機驗證用：一次起 db + migrate + serve + worker（+ pgadmin）。
+#   docker compose -f docker-compose.local.yaml up -d --build
+x-app: &app
+  build: .
+  image: todoapp:1.0
+  environment:
+    APP_ENV: ${APP_ENV:-dev}
+    # 同一個 compose network 內用 service 名稱 db，不是 localhost
+    DB_SOURCE: ${DB_SOURCE:-postgresql://root:secret@db:5432/todoapp?sslmode=disable}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d todoapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    <<: *app
+    command: ["migrate", "up"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  serve:
+    <<: *app
+    command: ["serve", "--port", "8080"]
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/todos-summary"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  worker:
+    <<: *app
+    command: ["worker", "event"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@todoapp.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  pgadmin_data:
