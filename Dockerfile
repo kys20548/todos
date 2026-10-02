@@ -13,6 +13,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o todoapp ./cmd/todoapp
 FROM alpine:3.22
 # 不用 root 跑：容器內被攻破時權限小一點
 RUN adduser -D -u 10001 app
+# healthcheck 用 bash 內建的 /dev/tcp 探測 port，不依賴 wget / curl；alpine 預設只有 busybox sh，要另外裝 bash
+RUN apk add --no-cache bash
 WORKDIR /app
 
 COPY --from=builder /app/todoapp .
