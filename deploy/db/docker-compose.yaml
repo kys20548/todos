@@ -1,4 +1,4 @@
-# devbox（內網機）上的部署檔：只有資料庫。
+# devbox（內網機）上的部署檔：資料庫 + Gitea（內部 git 伺服器，用內建 SQLite）。
 # 在這個目錄放 .env（範本見 ../../.env.example）後：docker compose up -d
 services:
   db:
@@ -20,5 +20,31 @@ services:
       timeout: 5s
       retries: 5
 
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: gitea
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      # 不設定就是 sqlite3，這裡明寫出來，資料庫檔在 /data/gitea/gitea.db
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: ${GITEA_DOMAIN:-10.140.0.29}
+      GITEA__server__ROOT_URL: ${GITEA_ROOT_URL:-http://localhost:3000/}
+      GITEA__server__SSH_DOMAIN: ${GITEA_DOMAIN:-10.140.0.29}
+      GITEA__server__SSH_PORT: ${GITEA_SSH_PORT:-222}
+    ports:
+      # 不指定 IP（等同 0.0.0.0），本機才連得到；容器內 sshd 是 22，host 用 222，避免跟 devbox 自己的 sshd 衝突
+      - "3000:3000"
+      - "${GITEA_SSH_PORT:-222}:22"
+    volumes:
+      - gitea_data:/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
+  gitea_data:
